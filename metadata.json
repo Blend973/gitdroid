@@ -1,0 +1,6 @@
+{
+  "name": "Gitdroid",
+  "description": "An ultra-optimized, high-performance, battery-friendly GitHub client for Android, styled with a pure-black AMOLED theme and cyan accents. Supports selectable image rendering quality, download of releases, file content viewer, commits, and a max-10 search history limit, zero animations for low resources.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
