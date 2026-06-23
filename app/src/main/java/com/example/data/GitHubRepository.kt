@@ -4,11 +4,15 @@ import android.content.Context
 import android.util.Log
 import com.example.data.api.*
 import com.example.data.local.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
+import org.jsoup.Jsoup
 import java.io.IOException
 
 class GitHubRepository(context: Context) {
     private val service = RetrofitClient.service
+    private val rawService = RetrofitClient.rawFileService
     private val database = GitHubDatabase.getDatabase(context)
     private val dao = database.gitHubDao()
     private val prefs = GitHubPrefHelper(context)
@@ -91,7 +95,8 @@ class GitHubRepository(context: Context) {
     }
 
     suspend fun getRawContent(url: String): Result<String> = runCatching {
-        val responseBody = service.getRawContent(url, getAuthHeader())
+        // Use rawService (raw.githubusercontent.com) instead of main API service
+        val responseBody = rawService.getRawContent(url, getAuthHeader())
         responseBody.string()
     }
 
@@ -152,4 +157,35 @@ class GitHubRepository(context: Context) {
     fun setImageQuality(quality: String) = prefs.setImageQuality(quality)
     fun getMarkdownImageQuality(): String = prefs.getMarkdownImageQuality()
     fun setMarkdownImageQuality(quality: String) = prefs.setMarkdownImageQuality(quality)
+
+    // Proxy list
+    fun getProxyList(): List<String> = prefs.getProxyList()
+    fun setProxyList(proxies: List<String>) = prefs.setProxyList(proxies)
+
+    // User-Agent rotation toggle
+    fun isUARotationEnabled(): Boolean = prefs.isUARotationEnabled()
+    fun setUARotationEnabled(enabled: Boolean) = prefs.setUARotationEnabled(enabled)
+
+    // Scrape release notes from a GitHub release web page (not API).
+    // Bypasses api.github.com entirely — only called on-demand per user click.
+    suspend fun scrapeReleaseNotes(htmlUrl: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val doc = Jsoup.connect(htmlUrl)
+                .userAgent("Mozilla/5.0 (Android 14; Mobile; rv:121.0) Gecko/121.0 Firefox/121.0")
+                .timeout(10_000)
+                .followRedirects(true)
+                .get()
+            // GitHub renderer wraps release body in various selectors depending on layout version
+            val element = doc.selectFirst("div[data-testid=\"release-body\"] div.markdown-body")
+                ?: doc.selectFirst("div.Box-body div.markdown-body")
+                ?: doc.selectFirst("article.markdown-body")
+                ?: doc.selectFirst("div.markdown-body")
+            // Prefer wholeText (preserves newlines over inner blocks) over text()
+            element?.wholeText()?.trim()?.let { if (it.isBlank()) null else it }
+                ?: element?.text()?.trim()?.let { if (it.isBlank()) null else it }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to scrape release notes from $htmlUrl", e)
+            null
+        }
+    }
 }

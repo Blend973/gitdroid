@@ -8,6 +8,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -39,6 +40,7 @@ import com.example.data.api.GitHubApiRepository
 import com.example.data.api.GitHubUser
 import com.example.data.api.GitHubRelease
 import com.example.data.api.GitHubReleaseAsset
+import com.example.data.api.RetrofitClient
 import com.example.data.local.BookmarkedRepoEntity
 import com.example.data.local.RecentSearchEntity
 import androidx.compose.ui.text.AnnotatedString
@@ -1092,10 +1094,20 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
 
     val scrollKey = "dashboard_list"
     val savedState = viewModel.getScrollState(scrollKey)
-    val listState = androidx.compose.foundation.lazy.rememberLazyListState(
-        initialFirstVisibleItemIndex = savedState.first,
-        initialFirstVisibleItemScrollOffset = savedState.second
-    )
+    val listState = rememberLazyListState()
+    
+    // Restore scroll position after data is loaded (handle case where list is empty at composition time)
+    val hasAnyData = (searchQuery.isNotEmpty() && (searchReposResult.isNotEmpty() || searchUsersResult.isNotEmpty())) ||
+                     (searchQuery.isEmpty() && (bookmarkedRepos.isNotEmpty() || recentSearches.isNotEmpty()))
+    LaunchedEffect(listState, hasAnyData) {
+        if (hasAnyData) {
+            val targetIndex = savedState.first.coerceAtLeast(0)
+            val targetOffset = savedState.second.coerceAtLeast(0)
+            if (targetIndex > 0 || targetOffset > 0) {
+                listState.scrollToItem(targetIndex, targetOffset)
+            }
+        }
+    }
     
     DisposableEffect(listState) {
         onDispose {
@@ -2464,6 +2476,7 @@ fun InteractiveMarkdownText(
 fun MarkdownText(
     text: String,
     baseUrl: String? = null,
+    searchQuery: String = "",
     modifier: Modifier = Modifier,
     color: Color = Color(0xFFC9D1D9),
     fontSize: TextUnit = 14.sp,
@@ -2472,8 +2485,13 @@ fun MarkdownText(
     lineHeight: TextUnit = TextUnit.Unspecified
 ) {
     val parsed = remember(text, baseUrl) { parseInlineMarkdown(text, baseUrl) }
+    val annotatedString = if (searchQuery.isNotBlank()) {
+        applySearchHighlight(parsed.annotatedString, searchQuery)
+    } else {
+        parsed.annotatedString
+    }
     InteractiveMarkdownText(
-        annotatedString = parsed.annotatedString,
+        annotatedString = annotatedString,
         inlineContent = parsed.inlineContent,
         modifier = modifier,
         color = color,
@@ -2510,19 +2528,8 @@ fun resolveMarkdownUrl(url: String, baseUrl: String?): String {
     }
 }
 
-/**
- * Wraps search query matches in markdown bold syntax so they render as highlighted
- * text when passed through MarkdownPreview.
- */
-private fun highlightTextForMarkdown(text: String, query: String): String {
-    if (query.isBlank()) return text
-    return text.replace(Regex(Regex.escape(query), RegexOption.IGNORE_CASE)) {
-        "**${it.value}**"
-    }
-}
-
 @Composable
-fun MarkdownPreview(readme: String, baseUrl: String? = null, imageQuality: String = "HIGH") {
+fun MarkdownPreview(readme: String, baseUrl: String? = null, imageQuality: String = "HIGH", searchQuery: String = "") {
     val blocksState = produceState<List<MarkdownBlock>>(initialValue = emptyList(), key1 = readme) {
         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             parseMarkdownBlocks(readme)
@@ -2550,6 +2557,7 @@ fun MarkdownPreview(readme: String, baseUrl: String? = null, imageQuality: Strin
                     MarkdownText(
                         text = block.text,
                         baseUrl = baseUrl,
+                        searchQuery = searchQuery,
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = when (block.level) {
@@ -2565,6 +2573,7 @@ fun MarkdownPreview(readme: String, baseUrl: String? = null, imageQuality: Strin
                     MarkdownText(
                         text = block.text,
                         baseUrl = baseUrl,
+                        searchQuery = searchQuery,
                         color = Color(0xFFC9D1D9),
                         fontSize = 14.sp,
                         modifier = Modifier.padding(bottom = 8.dp),
@@ -2572,6 +2581,11 @@ fun MarkdownPreview(readme: String, baseUrl: String? = null, imageQuality: Strin
                     )
                 }
                 is MarkdownBlock.CodeBlock -> {
+                    val codeAnnotated = if (searchQuery.isNotBlank()) {
+                        highlightSearchAnnotated(block.code, searchQuery)
+                    } else {
+                        AnnotatedString(block.code)
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2583,7 +2597,7 @@ fun MarkdownPreview(readme: String, baseUrl: String? = null, imageQuality: Strin
                     ) {
                         SelectionContainer {
                             Text(
-                                text = block.code,
+                                text = codeAnnotated,
                                 color = Color(0xFFE6EDF3),
                                 fontSize = 13.sp,
                                 fontFamily = FontFamily.Default,
@@ -2598,6 +2612,7 @@ fun MarkdownPreview(readme: String, baseUrl: String? = null, imageQuality: Strin
                         MarkdownText(
                             text = block.text,
                             baseUrl = baseUrl,
+                            searchQuery = searchQuery,
                             color = Color(0xFFC9D1D9),
                             fontSize = 14.sp,
                             lineHeight = 20.sp
@@ -2610,6 +2625,7 @@ fun MarkdownPreview(readme: String, baseUrl: String? = null, imageQuality: Strin
                         MarkdownText(
                             text = block.text,
                             baseUrl = baseUrl,
+                            searchQuery = searchQuery,
                             color = Color(0xFFC9D1D9),
                             fontSize = 14.sp,
                             lineHeight = 20.sp
@@ -2773,10 +2789,18 @@ fun CodeContentsTab(viewModel: GitHubViewModel) {
                 val repoName = viewModel.repoDetailData.value?.name ?: ""
                 val dirScrollKey = "dir_${repoOwner}_${repoName}_${codePath}"
                 val dirSavedState = viewModel.getScrollState(dirScrollKey)
-                val dirListState = androidx.compose.foundation.lazy.rememberLazyListState(
-                    initialFirstVisibleItemIndex = dirSavedState.first,
-                    initialFirstVisibleItemScrollOffset = dirSavedState.second
-                )
+                val dirListState = rememberLazyListState()
+                
+                // Restore directory scroll after contents load
+                LaunchedEffect(dirListState, contents, codePath) {
+                    if (contents.isNotEmpty()) {
+                        val targetIndex = dirSavedState.first.coerceAtLeast(0)
+                        val targetOffset = dirSavedState.second.coerceAtLeast(0)
+                        if (targetIndex > 0 || targetOffset > 0) {
+                            dirListState.scrollToItem(targetIndex, targetOffset)
+                        }
+                    }
+                }
                 
                 DisposableEffect(dirListState, codePath) {
                     onDispose {
@@ -3412,6 +3436,12 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
     val error by viewModel.releasesError.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     var releaseSearchQuery by remember { mutableStateOf("") }
+    val repoDetail by viewModel.repoDetailData.collectAsState()
+
+    // Release notes popup state
+    var viewingReleaseNotes by remember { mutableStateOf<GitHubRelease?>(null) }
+    val releaseNotesLoading by viewModel.releaseNotesLoading.collectAsState()
+    val releaseNotesContent by viewModel.releaseNotesContent.collectAsState()
 
     if (loading) {
         Box(modifier = Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) {
@@ -3580,7 +3610,28 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                     color = Color.LightGray,
                                     fontSize = 11.sp,
                                     maxLines = 4,
-                                    overflow = TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            viewingReleaseNotes = release
+                                            viewModel.scrapeReleaseNotes(release.htmlUrl ?: return@clickable)
+                                        }
+                                )
+                            } else if (release.htmlUrl != null) {
+                                // No body from API — still allow click to scrape from web page
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "View release notes...",
+                                    color = Color(0xFF00E5FF),
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Default,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            viewingReleaseNotes = release
+                                            viewModel.scrapeReleaseNotes(release.htmlUrl)
+                                        }
                                 )
                             }
                             
@@ -3667,8 +3718,9 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                         }
                                     }
 
-                                    // 2. Append Zipball source download
-                                    if (!release.zipballUrl.isNullOrBlank()) {
+                                    // 2. Append Zipball source download (via codeload.github.com — bypasses api.github.com rate limit)
+                                    val codeloadZipUrl = "https://codeload.github.com/${repoDetail?.owner?.login ?: ""}/${repoDetail?.name ?: ""}/zip/refs/tags/${release.tagName}"
+                                    if (codeloadZipUrl.isNotBlank() && repoDetail != null) {
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -3677,7 +3729,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                                 .background(Color(0xFF0A0A0A))
                                                 .clickable {
                                                     val saveName = "${release.tagName}-source.zip"
-                                                    downloadFileUsingManager(context, release.zipballUrl, saveName)
+                                                    downloadFileUsingManager(context, codeloadZipUrl, saveName)
                                                 }
                                                 .padding(10.dp),
                                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -3710,8 +3762,9 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                         }
                                     }
                                     
-                                    // 3. Append Tarball source download
-                                    if (!release.tarballUrl.isNullOrBlank()) {
+                                    // 3. Append Tarball source download (via codeload.github.com — bypasses api.github.com rate limit)
+                                    val codeloadTarUrl = "https://codeload.github.com/${repoDetail?.owner?.login ?: ""}/${repoDetail?.name ?: ""}/tar.gz/refs/tags/${release.tagName}"
+                                    if (codeloadTarUrl.isNotBlank() && repoDetail != null) {
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -3720,7 +3773,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                                 .background(Color(0xFF0A0A0A))
                                                 .clickable {
                                                     val saveName = "${release.tagName}-source.tar.gz"
-                                                    downloadFileUsingManager(context, release.tarballUrl, saveName)
+                                                    downloadFileUsingManager(context, codeloadTarUrl, saveName)
                                                 }
                                                 .padding(10.dp),
                                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -3753,6 +3806,126 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Release notes popup — scraped from the web page, not the API
+    viewingReleaseNotes?.let { release ->
+        Dialog(onDismissRequest = {
+            viewingReleaseNotes = null
+            viewModel.clearReleaseNotes()
+        }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.75f)
+                    .border(2.dp, Color(0xFF00E5FF), RoundedCornerShape(8.dp)),
+                colors = CardDefaults.cardColors(containerColor = Color.Black)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Notes, contentDescription = null, tint = Color(0xFF00E5FF))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "RELEASE NOTES",
+                                color = Color(0xFF00E5FF),
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Default
+                            )
+                        }
+                        IconButton(onClick = {
+                            viewingReleaseNotes = null
+                            viewModel.clearReleaseNotes()
+                        }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Release name/tag header
+                    Text(
+                        text = release.name ?: release.tagName,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        fontFamily = FontFamily.Default
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = release.tagName,
+                        color = Color(0xFF8B949E),
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Default
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Notes content area
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .background(Color(0xFF080808))
+                            .border(1.dp, Color(0xFF151515))
+                            .padding(12.dp)
+                    ) {
+                        when {
+                            releaseNotesLoading -> {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        CircularProgressIndicator(
+                                            color = Color(0xFF00E5FF),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text(
+                                            "Scraping release notes from GitHub...",
+                                            color = Color.Gray,
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Default
+                                        )
+                                    }
+                                }
+                            }
+                            releaseNotesContent != null -> {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(rememberScrollState())
+                                ) {
+                                    Text(
+                                        text = releaseNotesContent!!,
+                                        color = Color.LightGray,
+                                        fontSize = 12.sp,
+                                        fontFamily = FontFamily.Default
+                                    )
+                                }
+                            }
+                            else -> {
+                                // Fallback: show the body from API (already loaded)
+                                Text(
+                                    text = release.body ?: "No release notes available.",
+                                    color = Color.Gray,
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Default
+                                )
                             }
                         }
                     }
@@ -3813,10 +3986,18 @@ fun UserProfileScreen(viewModel: GitHubViewModel, username: String) {
 
     val scrollKey = "profile_${username}"
     val savedState = viewModel.getScrollState(scrollKey)
-    val listState = androidx.compose.foundation.lazy.rememberLazyListState(
-        initialFirstVisibleItemIndex = savedState.first,
-        initialFirstVisibleItemScrollOffset = savedState.second
-    )
+    val listState = rememberLazyListState()
+    
+    // Restore scroll position after repos load (handle empty list at composition time)
+    LaunchedEffect(listState, repos) {
+        if (repos.isNotEmpty()) {
+            val targetIndex = savedState.first.coerceAtLeast(0)
+            val targetOffset = savedState.second.coerceAtLeast(0)
+            if (targetIndex > 0 || targetOffset > 0) {
+                listState.scrollToItem(targetIndex, targetOffset)
+            }
+        }
+    }
     
     DisposableEffect(listState) {
         onDispose {
@@ -4052,16 +4233,18 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                         fontSize = 11.sp
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-                    Button(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            keyboardController?.hide()
-                            viewModel.saveToken(inputToken)
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color.Black),
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text("SAVE AND UPDATE PAT", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Default, fontSize = 12.sp)
+                    if (inputToken != (currentToken ?: "")) {
+                        Button(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                keyboardController?.hide()
+                                viewModel.saveToken(inputToken)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color.Black),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text("SAVE AND UPDATE PAT", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Default, fontSize = 12.sp)
+                        }
                     }
                 }
             }
@@ -4109,7 +4292,7 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                         singleLine = true
                     )
                     if (hasUserChanged) {
-                        Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                         Button(
                             modifier = Modifier.fillMaxWidth(),
                             onClick = {
@@ -4123,6 +4306,144 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                         ) {
                             Text("SAVE DEFAULT USER", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Default, fontSize = 12.sp)
                         }
+                    }
+                }
+            }
+        }
+
+        // Proxy Configuration Card
+        item {
+            val proxyListState by viewModel.proxyList.collectAsState()
+            val uaEnabled by viewModel.uaRotationEnabled.collectAsState()
+            var proxyInput by remember { mutableStateOf(proxyListState.joinToString("\n")) }
+            var uaToggle by remember(uaEnabled) { mutableStateOf(uaEnabled) }
+            val activeCount = RetrofitClient.proxySelector.proxyCount()
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Color(0xFF222222), RoundedCornerShape(8.dp)),
+                colors = CardDefaults.cardColors(containerColor = Color.Black)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFF00E5FF))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "RATE LIMIT EVASION",
+                            color = Color(0xFF00E5FF),
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Default,
+                            fontSize = 12.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Rotate proxies and user-agents to bypass IP-based rate limiting and WAF fingerprinting.",
+                        color = Color.Gray,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Default
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // UA rotation toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text(
+                                text = "USER-AGENT ROTATION",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Default
+                            )
+                            Text(
+                                text = "Cycle browser UAs on each request",
+                                color = Color.Gray,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Default
+                            )
+                        }
+                        androidx.compose.material3.Switch(
+                            checked = uaToggle,
+                            onCheckedChange = {
+                                uaToggle = it
+                                viewModel.toggleUARotation(it)
+                            },
+                            colors = androidx.compose.material3.SwitchDefaults.colors(
+                                checkedTrackColor = Color(0xFF00E5FF),
+                                uncheckedTrackColor = Color(0xFF333333),
+                                checkedThumbColor = Color.White,
+                                uncheckedThumbColor = Color.Gray
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Proxy list
+                    Text(
+                        text = "PROXY POOL (one per line, format: host:port)",
+                        color = Color(0xFF8B949E),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Default
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = proxyInput,
+                        onValueChange = { proxyInput = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 80.dp),
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontSize = 11.sp,
+                            color = Color.White,
+                            fontFamily = FontFamily.Default
+                        ),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF00E5FF),
+                            unfocusedBorderColor = Color(0xFF333333),
+                            focusedContainerColor = Color(0xFF0A0A0A),
+                            unfocusedContainerColor = Color(0xFF0A0A0A),
+                            cursorColor = Color(0xFF00E5FF)
+                        ),
+                        placeholder = {
+                            Text(
+                                text = "192.168.1.1:8080\n203.0.113.5:3128\n10.0.0.1:8888",
+                                color = Color(0xFF555555),
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Default
+                            )
+                        },
+                        maxLines = 8
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = if (activeCount > 0) "$activeCount proxies active" else "No proxies configured — using direct connection",
+                        color = if (activeCount > 0) Color(0xFF50FA7B) else Color.Gray,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Default
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            keyboardController?.hide()
+                            val entries = proxyInput
+                                .split("\n")
+                                .map { it.trim() }
+                                .filter { it.isNotBlank() }
+                            viewModel.saveProxyList(entries)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color.Black),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text("SAVE PROXY LIST", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Default, fontSize = 12.sp)
                     }
                 }
             }
@@ -4608,12 +4929,12 @@ fun FileViewScreen(
                         if (isPreviewMode && activeViewFileContent.isNotEmpty()) {
                             Box(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
                                     val baseUrl = downloadUrl.substringBeforeLast("/")?.plus("/")
-                                    val previewContent = if (searchQuery.isNotEmpty()) {
-                                        highlightTextForMarkdown(activeViewFileContent, searchQuery)
-                                    } else {
-                                        activeViewFileContent
-                                    }
-                                    MarkdownPreview(readme = previewContent, baseUrl = baseUrl, imageQuality = markdownImageQuality)
+                                    MarkdownPreview(
+                                        readme = activeViewFileContent,
+                                        baseUrl = baseUrl,
+                                        imageQuality = markdownImageQuality,
+                                        searchQuery = searchQuery
+                                    )
                             }
                         } else {
                             val isImageFile = fileName.endsWith(".png", ignoreCase = true) ||

@@ -109,9 +109,21 @@ class GitHubViewModel(application: Application) : AndroidViewModel(application) 
     val releasesList = MutableStateFlow<List<GitHubRelease>>(emptyList())
     val releasesError = MutableStateFlow<String?>(null)
 
+    // Release notes scraping (on-demand from web page, not API)
+    val releaseNotesLoading = MutableStateFlow(false)
+    val releaseNotesContent = MutableStateFlow<String?>(null)
+
+    // Proxy + UA rotation settings
+    val proxyList = MutableStateFlow<List<String>>(emptyList())
+    val uaRotationEnabled = MutableStateFlow(true)
+
     init {
-        // Load default config
-        // activeHostUser is already initialized above
+        // Load persisted proxy list into the shared RoundRobinProxySelector
+        val storedProxies = repository.getProxyList()
+        proxyList.value = storedProxies
+        pushProxiesToSelector(storedProxies)
+        uaRotationEnabled.value = repository.isUARotationEnabled()
+        RetrofitClient.uaRotationEnabled = uaRotationEnabled.value
 
         // Dynamically update back enabled state when search query changes
         viewModelScope.launch {
@@ -119,6 +131,35 @@ class GitHubViewModel(application: Application) : AndroidViewModel(application) 
                 updateBackEnabled()
             }
         }
+    }
+
+    fun saveProxyList(proxies: List<String>) {
+        proxyList.value = proxies
+        repository.setProxyList(proxies)
+        pushProxiesToSelector(proxies)
+    }
+
+    private fun pushProxiesToSelector(proxies: List<String>) {
+        val parsed = proxies.mapNotNull { entry ->
+            val cleaned = entry.trim()
+                .removePrefix("http://")
+                .removePrefix("https://")
+                .removePrefix("socks5://")
+                .removePrefix("socks4://")
+            val colonIdx = cleaned.lastIndexOf(':')
+            if (colonIdx > 0) {
+                val host = cleaned.substring(0, colonIdx)
+                val port = cleaned.substring(colonIdx + 1).toIntOrNull()
+                if (host.isNotBlank() && port != null) Pair(host, port) else null
+            } else null
+        }
+        RetrofitClient.proxySelector.updateProxies(parsed)
+    }
+
+    fun toggleUARotation(enabled: Boolean) {
+        uaRotationEnabled.value = enabled
+        repository.setUARotationEnabled(enabled)
+        RetrofitClient.uaRotationEnabled = enabled
     }
 
     private fun updateBackEnabled() {
@@ -555,6 +596,20 @@ class GitHubViewModel(application: Application) : AndroidViewModel(application) 
             )
             releasesLoading.value = false
         }
+    }
+
+    // Scrape full release notes from the GitHub web page (not API).
+    // Called on-demand when user taps the release notes preview.
+    fun scrapeReleaseNotes(htmlUrl: String) {
+        viewModelScope.launch {
+            releaseNotesLoading.value = true
+            releaseNotesContent.value = repository.scrapeReleaseNotes(htmlUrl)
+            releaseNotesLoading.value = false
+        }
+    }
+
+    fun clearReleaseNotes() {
+        releaseNotesContent.value = null
     }
 
     // Quick direct repository search (to jump to repository directly from search or bookmarks)

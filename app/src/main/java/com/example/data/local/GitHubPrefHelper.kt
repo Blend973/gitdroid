@@ -45,4 +45,24 @@ class GitHubPrefHelper(context: Context) {
         val mapped = if (quality.uppercase() == "DISABLE" || quality.uppercase() == "OFF") "OFF" else "ON"
         prefs.edit().putString("markdown_image_quality", mapped).apply()
     }
+
+    // Proxy list: stored as newline-separated "host:port" entries
+    fun getProxyList(): List<String> {
+        val raw = prefs.getString("proxy_list", null) ?: return emptyList()
+        return raw.split("\n").map { it.trim() }.filter { it.isNotBlank() }
+    }
+
+    fun setProxyList(proxies: List<String>) {
+        val raw = proxies.joinToString("\n")
+        prefs.edit().putString("proxy_list", raw).apply()
+    }
+
+    // User-Agent rotation toggle
+    fun isUARotationEnabled(): Boolean {
+        return prefs.getBoolean("ua_rotation", true)
+    }
+
+    fun setUARotationEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("ua_rotation", enabled).apply()
+    }
 }
