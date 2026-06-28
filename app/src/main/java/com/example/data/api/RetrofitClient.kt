@@ -117,7 +117,7 @@ object RetrofitClient {
                     .build()
                 chain.proceed(request)
             }
-            // Network interceptor: force all successful GET responses to be cacheable for 5 minutes.
+            // Network interceptor: force all successful GET responses to be cacheable for 3 days.
             // OkHttp's built-in cache stores ETags from GitHub, then sends conditional
             // If-None-Match requests on stale cache. A 304 response means served-from-cache
             // and does NOT count against GitHub's rate limit.
@@ -125,7 +125,7 @@ object RetrofitClient {
                 val response = chain.proceed(chain.request())
                 if (chain.request().method == "GET" && response.isSuccessful) {
                     response.newBuilder()
-                        .header("Cache-Control", "public, max-age=300")
+                        .header("Cache-Control", "public, max-age=259200") // 3 days
                         .removeHeader("Pragma")
                         .removeHeader("Expires")
                         .build()
@@ -167,7 +167,7 @@ object RetrofitClient {
                 val response = chain.proceed(chain.request())
                 if (chain.request().method == "GET" && response.isSuccessful) {
                     response.newBuilder()
-                        .header("Cache-Control", "public, max-age=600") // 10 min for files
+                        .header("Cache-Control", "public, max-age=259200") // 3 days for files
                         .removeHeader("Pragma")
                         .removeHeader("Expires")
                         .build()

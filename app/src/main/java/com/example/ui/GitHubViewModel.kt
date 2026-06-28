@@ -600,10 +600,19 @@ class GitHubViewModel(application: Application) : AndroidViewModel(application) 
 
     // Scrape full release notes from the GitHub web page (not API).
     // Called on-demand when user taps the release notes preview.
+    // Results are cached per URL so re-opening the dialog doesn't re-scrape.
+    private val releaseNotesCache = mutableMapOf<String, String?>()
+
     fun scrapeReleaseNotes(htmlUrl: String) {
         viewModelScope.launch {
+            releaseNotesCache[htmlUrl]?.let {
+                releaseNotesContent.value = it
+                return@launch
+            }
             releaseNotesLoading.value = true
-            releaseNotesContent.value = repository.scrapeReleaseNotes(htmlUrl)
+            val result = repository.scrapeReleaseNotes(htmlUrl)
+            releaseNotesCache[htmlUrl] = result
+            releaseNotesContent.value = result
             releaseNotesLoading.value = false
         }
     }

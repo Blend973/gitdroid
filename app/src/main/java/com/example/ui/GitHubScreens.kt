@@ -43,6 +43,7 @@ import com.example.data.api.GitHubReleaseAsset
 import com.example.data.api.RetrofitClient
 import com.example.data.local.BookmarkedRepoEntity
 import com.example.data.local.RecentSearchEntity
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
@@ -3491,6 +3492,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                         fontSize = 12.sp,
                         color = Color.White
                     ),
+                    cursorBrush = SolidColor(Color.White),
                     singleLine = true,
                     decorationBox = { innerTextField ->
                         Row(
@@ -4430,20 +4432,23 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                         fontFamily = FontFamily.Default
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    Button(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            keyboardController?.hide()
-                            val entries = proxyInput
-                                .split("\n")
-                                .map { it.trim() }
-                                .filter { it.isNotBlank() }
-                            viewModel.saveProxyList(entries)
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color.Black),
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text("SAVE PROXY LIST", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Default, fontSize = 12.sp)
+                    val hasProxyChanged = proxyInput.trim() != proxyListState.joinToString("\n").trim()
+                    if (hasProxyChanged) {
+                        Button(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                keyboardController?.hide()
+                                val entries = proxyInput
+                                    .split("\n")
+                                    .map { it.trim() }
+                                    .filter { it.isNotBlank() }
+                                viewModel.saveProxyList(entries)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color.Black),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text("SAVE PROXY LIST", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Default, fontSize = 12.sp)
+                        }
                     }
                 }
             }
@@ -4737,6 +4742,7 @@ fun FileViewScreen(
                         fontSize = 12.sp,
                         color = Color.White
                     ),
+                    cursorBrush = SolidColor(Color.White),
                     singleLine = true,
                     decorationBox = { innerTextField ->
                         Row(

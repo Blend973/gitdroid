@@ -76,5 +76,12 @@
 # Keep useful annotations for crash reporting
 -keepattributes *Annotation*
 
+# ---------------------------------------------------------------------------
+# Compose Foundation — R8 internal NPE on ContentInViewNode.launchAnimation()
+# Seen with AGP 9.1.1 + Compose BOM 2024.09.00. R8's API-level database
+# returns null when processing this class; keep prevents R8 from visiting it.
+# ---------------------------------------------------------------------------
+-keep class androidx.compose.foundation.gestures.ContentInViewNode { *; }
+
 # Keep source file name + line numbers for readable stack traces
 -keepattributes SourceFile,LineNumberTable
