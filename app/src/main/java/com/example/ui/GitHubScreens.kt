@@ -3506,7 +3506,10 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                 modifier = Modifier.size(14.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Box(modifier = Modifier.weight(1f)) {
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
                                 if (releaseSearchQuery.isEmpty()) {
                                     Text(
                                         "Search releases...",
@@ -3601,6 +3604,15 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                         fontFamily = FontFamily.Default
                                     )
                                 }
+                            }
+                            if (release.publishedAt != null) {
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = release.publishedAt.take(10),
+                                    color = Color(0xFF8B949E),
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Default
+                                )
                             }
                             if (!release.body.isNullOrBlank()) {
                                 Spacer(modifier = Modifier.height(6.dp))
@@ -4756,7 +4768,10 @@ fun FileViewScreen(
                                 modifier = Modifier.size(14.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Box(modifier = Modifier.weight(1f)) {
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
                                 if (searchQuery.isEmpty()) {
                                     Text(
                                         "Find text in file...",

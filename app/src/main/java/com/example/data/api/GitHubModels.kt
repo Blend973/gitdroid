@@ -114,6 +114,7 @@ data class GitHubRelease(
     @Json(name = "tag_name") val tagName: String,
     val name: String?,
     val body: String?,
+    @Json(name = "published_at") val publishedAt: String?,
     @Json(name = "html_url") val htmlUrl: String?,
     @Json(name = "zipball_url") val zipballUrl: String?,
     @Json(name = "tarball_url") val tarballUrl: String?,
