@@ -23,6 +23,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalClipboardManager
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -2151,6 +2153,45 @@ fun unescapeHtml(text: String): String {
         .replace("&quot;", "\"")
         .replace("&apos;", "'")
         .replace("&nbsp;", " ")
+}
+
+fun stripInlineMarkdownToPlainText(raw: String): String {
+    return try {
+        parseInlineMarkdown(raw, null).annotatedString.text.trim()
+    } catch (e: Exception) {
+        raw.trim()
+    }
+}
+
+fun markdownBlocksToPlainText(blocks: List<MarkdownBlock>): String {
+    val sb = StringBuilder()
+    for (block in blocks) {
+        val blockText = when (block) {
+            is MarkdownBlock.Header -> stripInlineMarkdownToPlainText(block.text)
+            is MarkdownBlock.Paragraph -> stripInlineMarkdownToPlainText(block.text)
+            is MarkdownBlock.CodeBlock -> block.code
+            is MarkdownBlock.Bullet -> "• " + stripInlineMarkdownToPlainText(block.text)
+            is MarkdownBlock.NumberedList -> "${block.number}. " + stripInlineMarkdownToPlainText(block.text)
+            is MarkdownBlock.TaskList -> (if (block.checked) "[x] " else "[ ] ") + stripInlineMarkdownToPlainText(block.text)
+            is MarkdownBlock.Blockquote -> stripInlineMarkdownToPlainText(block.text)
+            is MarkdownBlock.HorizontalRule -> "---"
+            is MarkdownBlock.ImageBlock -> if (block.alt.isNotBlank()) block.alt else "[Image]"
+        }
+        if (blockText.isNotBlank()) {
+            if (sb.isNotEmpty()) sb.append("\n\n")
+            sb.append(blockText)
+        }
+    }
+    return sb.toString()
+}
+
+fun markdownPreviewToPlainText(content: String): String {
+    if (content.isBlank()) return ""
+    return try {
+        markdownBlocksToPlainText(parseMarkdownBlocks(content))
+    } catch (e: Exception) {
+        content
+    }
 }
 
 data class ParsedMarkdownText(
@@ -4670,6 +4711,16 @@ fun FileViewScreen(
     
     var searchQuery by remember { mutableStateOf("") }
     var isPreviewMode by remember { mutableStateOf(fileName.endsWith(".md", ignoreCase = true)) }
+    val isMarkdownFile = fileName.endsWith(".md", ignoreCase = true)
+    val clipboardManager = LocalClipboardManager.current
+    val copyScope = rememberCoroutineScope()
+    var justCopied by remember { mutableStateOf(false) }
+    LaunchedEffect(justCopied) {
+        if (justCopied) {
+            kotlinx.coroutines.delay(1500)
+            justCopied = false
+        }
+    }
 
     // Search match navigation state
     var currentMatchIndex by remember { mutableIntStateOf(0) }
@@ -4921,12 +4972,54 @@ fun FileViewScreen(
                         byteCount >= 1024 -> String.format(java.util.Locale.US, "%.1f KB", byteCount.toFloat() / 1024)
                         else -> "$byteCount Bytes"
                     }
-                    Text(
-                        text = "$linesCount lines • $sizeFormatted",
-                        color = Color(0xFF8B949E),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "$linesCount lines • $sizeFormatted",
+                            color = Color(0xFF8B949E),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        IconButton(
+                            onClick = {
+                                if (activeViewFileContent.isEmpty()) {
+                                    android.widget.Toast.makeText(context, "Nothing to copy", android.widget.Toast.LENGTH_SHORT).show()
+                                } else {
+                                    copyScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+                                        val textToCopy = if (isPreviewMode && isMarkdownFile) {
+                                            markdownPreviewToPlainText(activeViewFileContent)
+                                        } else {
+                                            activeViewFileContent
+                                        }
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                            if (textToCopy.isNotEmpty()) {
+                                                clipboardManager.setText(AnnotatedString(textToCopy))
+                                                justCopied = true
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    if (isPreviewMode && isMarkdownFile) "Preview text copied" else "File content copied",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            } else {
+                                                android.widget.Toast.makeText(context, "Nothing to copy", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = activeViewFileContent.isNotEmpty() && !activeViewFileLoading && activeViewFileError == null,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (justCopied) Icons.Default.Check else Icons.Default.ContentCopy,
+                                contentDescription = if (isPreviewMode && isMarkdownFile) "Copy preview text" else "Copy file content",
+                                tint = if (justCopied) Color(0xFF3FB950) else Color(0xFF8B949E),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
                 }
 
                 HorizontalDivider(color = Color(0xFF30363D), thickness = 1.dp)
