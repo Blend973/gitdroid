@@ -46,15 +46,18 @@ class GitHubPrefHelper(context: Context) {
         prefs.edit().putString("markdown_image_quality", mapped).apply()
     }
 
-    // Proxy list: stored as newline-separated "host:port" entries
-    fun getProxyList(): List<String> {
-        val raw = prefs.getString("proxy_list", null) ?: return emptyList()
+    // Rotating IP identity pool. Stored as newline-separated IP entries.
+    // Legacy "proxy_list" values are still read once for a smooth migration.
+    fun getIpPool(): List<String> {
+        val raw = prefs.getString("ip_pool", null)
+            ?: prefs.getString("proxy_list", null)
+            ?: return emptyList()
         return raw.split("\n").map { it.trim() }.filter { it.isNotBlank() }
     }
 
-    fun setProxyList(proxies: List<String>) {
-        val raw = proxies.joinToString("\n")
-        prefs.edit().putString("proxy_list", raw).apply()
+    fun setIpPool(ips: List<String>) {
+        val raw = ips.joinToString("\n")
+        prefs.edit().putString("ip_pool", raw).apply()
     }
 
     // User-Agent rotation toggle

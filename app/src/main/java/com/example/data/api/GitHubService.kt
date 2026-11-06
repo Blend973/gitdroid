@@ -93,6 +93,18 @@ interface GitHubService {
         @Header("Authorization") auth: String? = null
     ): List<GitHubRelease>
 
+    // Whole repository tree in ONE REST call. GitHub's git/trees endpoint with
+    // recursive=1 is the specialised bulk-tree API (GraphQL cannot recurse
+    // arbitrarily deep). Navigation after this call is purely local.
+    @GET("repos/{owner}/{repo}/git/trees/{tree_sha}")
+    suspend fun getGitTree(
+        @Path("owner") owner: String,
+        @Path("repo") repo: String,
+        @Path("tree_sha") treeSha: String,
+        @Query("recursive") recursive: Int = 1,
+        @Header("Authorization") auth: String? = null
+    ): GitHubTreeResponse
+
     @retrofit2.http.GET
     suspend fun getRawContent(
         @retrofit2.http.Url url: String,

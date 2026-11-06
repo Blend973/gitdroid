@@ -32,7 +32,8 @@ data class GitHubApiRepository(
     @Json(name = "stargazers_count") val stargazersCount: Int?,
     @Json(name = "forks_count") val forksCount: Int?,
     val language: String?,
-    @Json(name = "open_issues_count") val openIssuesCount: Int?
+    @Json(name = "open_issues_count") val openIssuesCount: Int?,
+    @Json(name = "default_branch") val defaultBranch: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -127,4 +128,22 @@ data class GitHubReleaseAsset(
     val name: String,
     val size: Long,
     @Json(name = "browser_download_url") val browserDownloadUrl: String
+)
+
+@JsonClass(generateAdapter = true)
+data class GitHubTreeResponse(
+    val sha: String,
+    val url: String?,
+    val tree: List<GitHubTreeEntry>,
+    val truncated: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class GitHubTreeEntry(
+    val path: String,
+    val mode: String?,
+    val type: String, // "blob", "tree", "commit"
+    val sha: String,
+    val size: Long? = null,
+    val url: String? = null
 )

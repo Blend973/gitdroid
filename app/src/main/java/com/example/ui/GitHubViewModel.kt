@@ -1,13 +1,13 @@
 package com.example.ui
 
 import android.app.Application
-import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.GitHubRepository
 import com.example.data.api.*
 import com.example.data.local.BookmarkedRepoEntity
 import com.example.data.local.RecentSearchEntity
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -71,6 +71,7 @@ class GitHubViewModel(application: Application) : AndroidViewModel(application) 
     val codeContents = MutableStateFlow<List<GitHubContent>>(emptyList())
     val codeError = MutableStateFlow<String?>(null)
     private val codePathStack = mutableListOf<String>()
+    private var contentsJob: Job? = null
 
     // Issues
     val issuesLoading = MutableStateFlow(false)
@@ -103,25 +104,31 @@ class GitHubViewModel(application: Application) : AndroidViewModel(application) 
     val commitDetailLoading = MutableStateFlow(false)
     val activeCommitDetail = MutableStateFlow<GitHubCommitDetail?>(null)
     val commitDetailError = MutableStateFlow<String?>(null)
+    private var commitDetailJob: kotlinx.coroutines.Job? = null
 
     // Releases list
     val releasesLoading = MutableStateFlow(false)
     val releasesList = MutableStateFlow<List<GitHubRelease>>(emptyList())
     val releasesError = MutableStateFlow<String?>(null)
+    private var releasesLoadedFor: String? = null
 
     // Release notes scraping (on-demand from web page, not API)
     val releaseNotesLoading = MutableStateFlow(false)
     val releaseNotesContent = MutableStateFlow<String?>(null)
 
-    // Proxy + UA rotation settings
-    val proxyList = MutableStateFlow<List<String>>(emptyList())
+    // Rotating IP identity + UA rotation settings
+    val ipPool = MutableStateFlow<List<String>>(emptyList())
     val uaRotationEnabled = MutableStateFlow(true)
 
+    // Cache maintenance status
+    val cacheClearing = MutableStateFlow(false)
+    val cachesCleared = MutableStateFlow(false)
+
     init {
-        // Load persisted proxy list into the shared RoundRobinProxySelector
-        val storedProxies = repository.getProxyList()
-        proxyList.value = storedProxies
-        pushProxiesToSelector(storedProxies)
+        // Load persisted IP pool into the shared rotating identity ring
+        val storedIps = repository.getIpPool()
+        ipPool.value = storedIps
+        pushIpsToSelector(storedIps)
         uaRotationEnabled.value = repository.isUARotationEnabled()
         RetrofitClient.uaRotationEnabled = uaRotationEnabled.value
 
@@ -133,27 +140,14 @@ class GitHubViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun saveProxyList(proxies: List<String>) {
-        proxyList.value = proxies
-        repository.setProxyList(proxies)
-        pushProxiesToSelector(proxies)
+    fun saveIpPool(ips: List<String>) {
+        ipPool.value = ips
+        repository.setIpPool(ips)
+        pushIpsToSelector(ips)
     }
 
-    private fun pushProxiesToSelector(proxies: List<String>) {
-        val parsed = proxies.mapNotNull { entry ->
-            val cleaned = entry.trim()
-                .removePrefix("http://")
-                .removePrefix("https://")
-                .removePrefix("socks5://")
-                .removePrefix("socks4://")
-            val colonIdx = cleaned.lastIndexOf(':')
-            if (colonIdx > 0) {
-                val host = cleaned.substring(0, colonIdx)
-                val port = cleaned.substring(colonIdx + 1).toIntOrNull()
-                if (host.isNotBlank() && port != null) Pair(host, port) else null
-            } else null
-        }
-        RetrofitClient.proxySelector.updateProxies(parsed)
+    private fun pushIpsToSelector(ips: List<String>) {
+        RetrofitClient.updateIpPool(ips)
     }
 
     fun toggleUARotation(enabled: Boolean) {
@@ -318,9 +312,8 @@ class GitHubViewModel(application: Application) : AndroidViewModel(application) 
                         onSuccess = { repos ->
                             userProfileRepos.value = repos
                         },
-                        onFailure = { reposErr ->
+                        onFailure = {
                             // Soft error for repo list
-                            Log.e("GitHubViewModel", "Repos load error: ${reposErr.message}")
                         }
                     )
                 },
@@ -341,6 +334,10 @@ class GitHubViewModel(application: Application) : AndroidViewModel(application) 
             repoActiveTab.value = "CODE"
             codePath.value = ""
             codePathStack.clear()
+            contentsJob?.cancel()
+            codeContentsLoading.value = false
+            releasesLoadedFor = null
+            releasesList.value = emptyList()
             closeFileView()
             updateBackEnabled()
 
@@ -349,7 +346,7 @@ class GitHubViewModel(application: Application) : AndroidViewModel(application) 
                 onSuccess = { repo ->
                     repoDetailData.value = repo
                     repoDetailIsBookmarked.value = repository.isBookmarked(repo.id)
-                    // Trigger initial content scan
+                    // Fetch the tree once into the disk mirror, then navigate from it.
                     loadContents("")
                     // Trigger language retrieval
                     loadRepoLanguages(owner, repo.name)
@@ -369,29 +366,49 @@ class GitHubViewModel(application: Application) : AndroidViewModel(application) 
             val res = repository.getRepoLanguages(owner, repo)
             res.fold(
                 onSuccess = { repoLanguages.value = it },
-                onFailure = { Log.e("GitHubViewModel", "Languages load error: ${it.message}") }
+                onFailure = { }
             )
             repoLanguagesLoading.value = false
         }
     }
 
-    fun loadCommitDetail(owner: String, repo: String, sha: String) {
-        viewModelScope.launch {
+    fun loadCommitDetail(owner: String, repo: String, commit: GitHubCommit) {
+        commitDetailJob?.cancel()
+        commitDetailJob = viewModelScope.launch {
             commitDetailLoading.value = true
             commitDetailError.value = null
-            activeCommitDetail.value = null
-            val res = repository.getCommitDetail(owner, repo, sha)
+            // Show commit metadata immediately from the list entry while the
+            // patch is fetched from github.com (not api.github.com).
+            activeCommitDetail.value = GitHubCommitDetail(
+                sha = commit.sha,
+                commit = commit.commit,
+                author = commit.author,
+                files = null
+            )
+            val res = repository.getCommitPatchFiles(owner, repo, commit.sha)
             res.fold(
-                onSuccess = { activeCommitDetail.value = it },
-                onFailure = { commitDetailError.value = it.localizedMessage ?: "Failed to load commit detail" }
+                onSuccess = { files ->
+                    activeCommitDetail.value = GitHubCommitDetail(
+                        sha = commit.sha,
+                        commit = commit.commit,
+                        author = commit.author,
+                        files = files
+                    )
+                },
+                onFailure = {
+                    commitDetailError.value = it.localizedMessage ?: "Failed to load commit diff"
+                }
             )
             commitDetailLoading.value = false
         }
     }
 
     fun closeCommitDetail() {
+        commitDetailJob?.cancel()
+        commitDetailJob = null
         activeCommitDetail.value = null
         commitDetailError.value = null
+        commitDetailLoading.value = false
     }
 
     // Toggle Bookmarks
@@ -432,40 +449,77 @@ class GitHubViewModel(application: Application) : AndroidViewModel(application) 
 
     // Contents directories
     fun loadContents(path: String) {
-        viewModelScope.launch {
+        repoDetailData.value ?: return
+        // A new directory tap supersedes the previous one; cancelling stops an
+        // in-flight tree read from overwriting the directory the user is on.
+        contentsJob?.cancel()
+        contentsJob = viewModelScope.launch {
             codeContentsLoading.value = true
             codeError.value = null
-            readmeName.value = null
-            readmeContent.value = null
-            readmeDownloadUrl.value = null
-            readmeLoading.value = false
-            val repo = repoDetailData.value ?: return@launch
-            
+            clearReadme()
+            val repo = repoDetailData.value ?: run {
+                codeContentsLoading.value = false
+                return@launch
+            }
+
+            // Directory listings are scanned from the tree on disk, never from
+            // a whole-repo map held in RAM.
+            val branch = repo.defaultBranch ?: "main"
+            var listingRes = repository.getDirectoryListing(
+                repo.owner.login, repo.name, branch, path
+            )
+            if (listingRes.isFailure && repo.defaultBranch == null) {
+                // Empty/legacy repos may still use "master" instead of "main".
+                listingRes = repository.getDirectoryListing(
+                    repo.owner.login, repo.name, "master", path
+                )
+            }
+
+            val localListing = listingRes.getOrNull()?.entries
+            if (localListing != null) {
+                applyContents(path, localListing)
+                codeContentsLoading.value = false
+                return@launch
+            }
+
+            // Path missing from the tree, tree truncated, or repo too large:
+            // fall back to the per-directory contents API only for this path.
             val contentsRes = repository.getContents(repo.owner.login, repo.name, path)
             contentsRes.fold(
                 onSuccess = { rawList ->
-                    val sortedList = rawList.sortedWith(compareBy({ content -> content.type != "dir" }, { content -> content.name }))
-                    codeContents.value = sortedList
-                    codePath.value = path
-                    
-                    // Automatically auto-detect and background load README files
-                    val readmeFile = sortedList.firstOrNull { file ->
-                        file.type == "file" && (
-                            file.name.equals("README.md", ignoreCase = true) ||
-                            file.name.equals("README", ignoreCase = true) ||
-                            file.name.startsWith("README.", ignoreCase = true)
-                        )
-                    }
-                    if (readmeFile != null) {
-                        readmeName.value = readmeFile.name
-                        loadReadmeContent(readmeFile.downloadUrl)
-                    }
+                    applyContents(path, rawList)
                 },
                 onFailure = {
                     codeError.value = it.localizedMessage ?: "Failed to load repo files"
                 }
             )
             codeContentsLoading.value = false
+        }
+    }
+
+    private fun clearReadme() {
+        readmeName.value = null
+        readmeContent.value = null
+        readmeDownloadUrl.value = null
+        readmeLoading.value = false
+    }
+
+    private fun applyContents(path: String, rawList: List<GitHubContent>) {
+        val sortedList = rawList.sortedWith(compareBy({ content -> content.type != "dir" }, { content -> content.name }))
+        codeContents.value = sortedList
+        codePath.value = path
+
+        // Automatically auto-detect and background load README files
+        val readmeFile = sortedList.firstOrNull { file ->
+            file.type == "file" && (
+                file.name.equals("README.md", ignoreCase = true) ||
+                file.name.equals("README", ignoreCase = true) ||
+                file.name.startsWith("README.", ignoreCase = true)
+            )
+        }
+        if (readmeFile != null) {
+            readmeName.value = readmeFile.name
+            loadReadmeContent(readmeFile.downloadUrl)
         }
     }
 
@@ -578,17 +632,21 @@ class GitHubViewModel(application: Application) : AndroidViewModel(application) 
         activeViewFileError.value = null
     }
 
-    // Releases List Loader
-    fun loadReleases() {
+    // Releases List Loader — persistent cache first, API only when stale.
+    fun loadReleases(forceRefresh: Boolean = false) {
+        val repo = repoDetailData.value ?: return
+        val key = repo.fullName
+        if (!forceRefresh && releasesLoadedFor == key) return
+
         viewModelScope.launch {
             releasesLoading.value = true
             releasesError.value = null
-            val repo = repoDetailData.value ?: return@launch
-            
-            val res = repository.getReleases(repo.owner.login, repo.name)
+
+            val res = repository.getReleases(repo.owner.login, repo.name, forceRefresh)
             res.fold(
                 onSuccess = {
                     releasesList.value = it
+                    releasesLoadedFor = key
                 },
                 onFailure = {
                     releasesError.value = it.localizedMessage ?: "Failed to fetch releases"
@@ -598,27 +656,62 @@ class GitHubViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun refreshReleases() {
+        loadReleases(forceRefresh = true)
+    }
+
     // Scrape full release notes from the GitHub web page (not API).
-    // Called on-demand when user taps the release notes preview.
-    // Results are cached per URL so re-opening the dialog doesn't re-scrape.
-    private val releaseNotesCache = mutableMapOf<String, String?>()
+    // Called on-demand when user taps the release notes preview. The text is
+    // served from the JsonDiskCache mirror on repeat opens; only the currently
+    // displayed string is held in RAM.
+    private var releaseNotesJob: Job? = null
 
     fun scrapeReleaseNotes(htmlUrl: String) {
-        viewModelScope.launch {
-            releaseNotesCache[htmlUrl]?.let {
-                releaseNotesContent.value = it
-                return@launch
-            }
+        releaseNotesJob?.cancel()
+        releaseNotesJob = viewModelScope.launch {
             releaseNotesLoading.value = true
+            // Disk mirror hit costs one small file read, no Jsoup, no network.
             val result = repository.scrapeReleaseNotes(htmlUrl)
-            releaseNotesCache[htmlUrl] = result
             releaseNotesContent.value = result
             releaseNotesLoading.value = false
         }
     }
 
     fun clearReleaseNotes() {
+        releaseNotesJob?.cancel()
+        releaseNotesLoading.value = false
         releaseNotesContent.value = null
+    }
+
+    /**
+     * Clear every disk/memory cache in the app while preserving bookmarks,
+     * search history, tokens and settings.
+     */
+    fun clearAllCaches() {
+        if (cacheClearing.value) return
+        viewModelScope.launch {
+            cacheClearing.value = true
+            cachesCleared.value = false
+
+            // Reset in-memory mirrors so stale content cannot resurface.
+            releaseNotesJob?.cancel()
+            releaseNotesLoading.value = false
+            releaseNotesContent.value = null
+            releasesLoadedFor = null
+            releasesList.value = emptyList()
+            releasesError.value = null
+            readmeName.value = null
+            readmeContent.value = null
+            readmeDownloadUrl.value = null
+            activeViewFileName.value = ""
+            activeViewFileContent.value = ""
+            activeViewFileError.value = null
+
+            repository.clearAllCaches()
+
+            cacheClearing.value = false
+            cachesCleared.value = true
+        }
     }
 
     // Quick direct repository search (to jump to repository directly from search or bookmarks)

@@ -24,8 +24,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -328,7 +332,7 @@ fun OptimizedAvatar(
                 color = Color(0xFF00E5FF),
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Default,
-                fontSize = 11.sp
+                fontSize = 13.sp
             )
         }
     } else {
@@ -920,12 +924,43 @@ private fun highlightSearchAnnotated(text: String, query: String): AnnotatedStri
     return builder.toAnnotatedString()
 }
 
+/**
+ * Splits one big highlighted document into per-line AnnotatedStrings so the
+ * viewer can put each line in a LazyColumn item. Only visible lines are ever
+ * laid out, which keeps 5k+ line files scrollable while highlighting runs.
+ */
+private fun splitAnnotatedLines(text: AnnotatedString): List<AnnotatedString> {
+    val raw = text.text
+    if (raw.isEmpty()) return listOf(AnnotatedString(""))
+    val result = ArrayList<AnnotatedString>()
+    var start = 0
+    for (i in raw.indices) {
+        if (raw[i] == '\n') {
+            result.add(text.subSequence(start, i))
+            start = i + 1
+        }
+    }
+    result.add(text.subSequence(start, raw.length))
+    return result
+}
+
+/**
+ * Clears text-field focus when the user taps anywhere that is not a text
+ * field. detectTapGestures ignores presses already consumed by children,
+ * so tapping a search bar keeps its focus and caret exactly where they are.
+ */
+private fun Modifier.clearFocusOnTap(focusManager: androidx.compose.ui.focus.FocusManager): Modifier =
+    pointerInput(focusManager) {
+        detectTapGestures(onTap = { focusManager.clearFocus() })
+    }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GH4AAppContent(viewModel: GitHubViewModel) {
     CompositionLocalProvider(LocalGitHubViewModel provides viewModel) {
         val currentScreen by viewModel.currentScreen.collectAsState()
         val canGoBack by viewModel.isBackEnabled.collectAsState()
+        val focusManager = LocalFocusManager.current
 
         BackHandler(enabled = canGoBack) {
             viewModel.navigateBack()
@@ -934,7 +969,8 @@ fun GH4AAppContent(viewModel: GitHubViewModel) {
         Scaffold(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black),
+                .background(Color.Black)
+                .clearFocusOnTap(focusManager),
             topBar = {
                 TopAppBar(
                     title = {
@@ -952,7 +988,14 @@ fun GH4AAppContent(viewModel: GitHubViewModel) {
                                 color = Color(0xFF00E5FF),
                                 fontWeight = FontWeight.ExtraBold,
                                 fontFamily = FontFamily.Default,
-                                fontSize = 20.sp
+                                fontSize = 20.sp,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = if (currentScreen is Screen.FileView) {
+                                    Modifier.horizontalScroll(rememberScrollState())
+                                } else {
+                                    Modifier
+                                }
                             )
                         }
                     },
@@ -1189,7 +1232,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                                 "Repos",
                                 color = if (isRepoSelected) Color.Black else Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
+                                fontSize = 14.sp,
                                 fontFamily = FontFamily.Default
                             )
                         }
@@ -1203,7 +1246,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                                 "Users",
                                 color = if (!isRepoSelected) Color.Black else Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
+                                fontSize = 14.sp,
                                 fontFamily = FontFamily.Default
                             )
                         }
@@ -1224,7 +1267,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                             "RUN",
                             fontWeight = FontWeight.Black,
                             fontFamily = FontFamily.Default,
-                            fontSize = 12.sp
+                            fontSize = 14.sp
                         )
                     }
                 }
@@ -1251,7 +1294,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                 Text(
                     text = "Error: $err",
                     color = Color.Red,
-                    fontSize = 13.sp,
+                    fontSize = 15.sp,
                     fontFamily = FontFamily.Default,
                     modifier = Modifier.padding(vertical = 4.dp)
                 )
@@ -1266,7 +1309,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                         "SEARCH OUTPUT",
                         color = Color(0xFF00E5FF),
                         fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp,
+                        fontSize = 14.sp,
                         fontFamily = FontFamily.Default
                     )
                 }
@@ -1292,7 +1335,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                         "SEARCH OUTPUT (USERS)",
                         color = Color(0xFF00E5FF),
                         fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp,
+                        fontSize = 14.sp,
                         fontFamily = FontFamily.Default
                     )
                 }
@@ -1320,7 +1363,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                             "PINNED REPOSITORIES",
                             color = Color(0xFF00E5FF),
                             fontWeight = FontWeight.Black,
-                            fontSize = 12.sp,
+                            fontSize = 14.sp,
                             fontFamily = FontFamily.Default
                         )
                     }
@@ -1359,7 +1402,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                                     Text(
                                         text = "${bookmarked.stargazersCount}",
                                         color = Color.White,
-                                        fontSize = 12.sp,
+                                        fontSize = 14.sp,
                                         fontFamily = FontFamily.Default
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
@@ -1384,7 +1427,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                                 Text(
                                     text = bookmarked.description,
                                     color = Color.Gray,
-                                    fontSize = 12.sp,
+                                    fontSize = 14.sp,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -1414,7 +1457,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                                 "RECENT SEARCH QUERIES",
                                 color = Color.White.copy(alpha = 0.5f),
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
+                                fontSize = 13.sp,
                                 fontFamily = FontFamily.Default
                             )
                         }
@@ -1422,7 +1465,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                             "CLEAR ALL",
                             color = Color(0xFF00E5FF),
                             fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
+                            fontSize = 13.sp,
                             fontFamily = FontFamily.Default,
                             modifier = Modifier
                                 .clickable { viewModel.clearSearchHistory() }
@@ -1458,7 +1501,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                             Text(
                                 text = entity.query,
                                 color = Color.White,
-                                fontSize = 13.sp,
+                                fontSize = 15.sp,
                                 fontFamily = FontFamily.Default
                             )
                         }
@@ -1478,7 +1521,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                     "DIRECT REPOSITORY ACCESS",
                     color = Color.White.copy(alpha = 0.5f),
                     fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp,
+                    fontSize = 13.sp,
                     fontFamily = FontFamily.Default
                 )
             }
@@ -1496,7 +1539,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                     Text(
                         text = "Access via owner/name:",
                         color = Color.White,
-                        fontSize = 12.sp,
+                        fontSize = 14.sp,
                         fontFamily = FontFamily.Default,
                         fontWeight = FontWeight.Bold
                     )
@@ -1507,7 +1550,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                             directInput = it
                             directError = null
                         },
-                        placeholder = { Text("e.g. user/repo", fontSize = 13.sp) },
+                        placeholder = { Text("e.g. user/repo", fontSize = 15.sp) },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color(0xFF00E5FF),
@@ -1521,7 +1564,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                     )
                     if (directError != null) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(directError!!, color = Color.Red, fontSize = 11.sp, fontFamily = FontFamily.Default)
+                        Text(directError!!, color = Color.Red, fontSize = 13.sp, fontFamily = FontFamily.Default)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
@@ -1541,7 +1584,7 @@ fun DashboardScreen(viewModel: GitHubViewModel) {
                         shape = RoundedCornerShape(4.dp),
                         modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFF00E5FF), RoundedCornerShape(4.dp))
                     ) {
-                        Text("LOAD", fontWeight = FontWeight.Black, fontFamily = FontFamily.Default, fontSize = 12.sp)
+                        Text("LOAD", fontWeight = FontWeight.Black, fontFamily = FontFamily.Default, fontSize = 14.sp)
                     }
                 }
             }
@@ -1594,7 +1637,7 @@ fun RepositoryRow(
                 Text(
                     text = repo.description,
                     color = Color.White.copy(alpha = 0.8f),
-                    fontSize = 12.sp,
+                    fontSize = 14.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1611,7 +1654,7 @@ fun RepositoryRow(
                     Text(
                         text = "${repo.stargazersCount ?: 0}",
                         color = Color.White,
-                        fontSize = 11.sp,
+                        fontSize = 13.sp,
                         fontFamily = FontFamily.Default
                     )
                 }
@@ -1655,7 +1698,7 @@ fun UserRow(user: GitHubUser, quality: String, onClick: () -> Unit) {
             Text(
                 text = "ID: ${user.id}",
                 color = Color.Gray,
-                fontSize = 11.sp,
+                fontSize = 13.sp,
                 fontFamily = FontFamily.Default
             )
         }
@@ -1700,7 +1743,7 @@ fun RepositoryLanguagesBar(languages: Map<String, Long>, modifier: Modifier = Mo
             text = "LANGUAGES",
             color = Color.Gray,
             fontWeight = FontWeight.Bold,
-            fontSize = 11.sp,
+            fontSize = 13.sp,
             fontFamily = FontFamily.Default,
             modifier = Modifier.padding(bottom = 8.dp)
         )
@@ -1751,14 +1794,14 @@ fun RepositoryLanguagesBar(languages: Map<String, Long>, modifier: Modifier = Mo
                             text = lang,
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
+                            fontSize = 13.sp,
                             fontFamily = FontFamily.Default
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = String.format(java.util.Locale.US, "%.1f%%", percentage),
                             color = Color.Gray,
-                            fontSize = 11.sp,
+                            fontSize = 13.sp,
                             fontFamily = FontFamily.Default
                         )
                     }
@@ -1796,7 +1839,7 @@ fun RepositoryDetailScreen(viewModel: GitHubViewModel, owner: String, name: Stri
             Spacer(modifier = Modifier.height(12.dp))
             Text("Connection Failed", color = Color.White, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(6.dp))
-            Text(error!!, color = Color.Gray, fontSize = 12.sp, fontFamily = FontFamily.Default)
+            Text(error!!, color = Color.Gray, fontSize = 14.sp, fontFamily = FontFamily.Default)
             Spacer(modifier = Modifier.height(16.dp))
             Button(
                 onClick = { viewModel.loadRepositoryDetails(owner, name) },
@@ -1847,7 +1890,7 @@ fun RepositoryDetailScreen(viewModel: GitHubViewModel, owner: String, name: Stri
                         Text(
                             text = currentRepo.owner.login,
                             color = Color.Gray,
-                            fontSize = 12.sp,
+                            fontSize = 14.sp,
                             fontFamily = FontFamily.Default,
                             modifier = Modifier.clickable {
                                 viewModel.navigateTo(Screen.UserProfile(currentRepo.owner.login))
@@ -1877,7 +1920,7 @@ fun RepositoryDetailScreen(viewModel: GitHubViewModel, owner: String, name: Stri
                     Text(
                         text = currentRepo.description,
                         color = Color.White.copy(alpha = 0.8f),
-                        fontSize = 13.sp
+                        fontSize = 15.sp
                     )
                 }
 
@@ -1892,12 +1935,12 @@ fun RepositoryDetailScreen(viewModel: GitHubViewModel, owner: String, name: Stri
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Star, contentDescription = "Stars", tint = Color(0xFF00E5FF), modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(3.dp))
-                            Text("${currentRepo.stargazersCount ?: 0}", color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Default)
+                            Text("${currentRepo.stargazersCount ?: 0}", color = Color.White, fontSize = 14.sp, fontFamily = FontFamily.Default)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.ForkRight, contentDescription = "Forks", tint = Color.Gray, modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(3.dp))
-                            Text("${currentRepo.forksCount ?: 0}", color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Default)
+                            Text("${currentRepo.forksCount ?: 0}", color = Color.White, fontSize = 14.sp, fontFamily = FontFamily.Default)
                         }
                     }
 
@@ -1951,7 +1994,7 @@ fun RepositoryDetailScreen(viewModel: GitHubViewModel, owner: String, name: Stri
                         text = tab,
                         color = if (isSelected) Color.Black else Color.White,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp,
+                        fontSize = 13.sp,
                         fontFamily = FontFamily.Default
                     )
                 }
@@ -2563,10 +2606,10 @@ fun MarkdownPreview(readme: String, baseUrl: String? = null, imageQuality: Strin
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = when (block.level) {
-                            1 -> 24.sp
-                            2 -> 20.sp
-                            3 -> 18.sp
-                            else -> 16.sp
+                            1 -> 26.sp
+                            2 -> 22.sp
+                            3 -> 19.sp
+                            else -> 17.sp
                         },
                         modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
                     )
@@ -2577,9 +2620,9 @@ fun MarkdownPreview(readme: String, baseUrl: String? = null, imageQuality: Strin
                         baseUrl = baseUrl,
                         searchQuery = searchQuery,
                         color = Color(0xFFC9D1D9),
-                        fontSize = 14.sp,
+                        fontSize = 16.sp,
                         modifier = Modifier.padding(bottom = 8.dp),
-                        lineHeight = 20.sp
+                        lineHeight = 24.sp
                     )
                 }
                 is MarkdownBlock.CodeBlock -> {
@@ -2601,9 +2644,9 @@ fun MarkdownPreview(readme: String, baseUrl: String? = null, imageQuality: Strin
                             Text(
                                 text = codeAnnotated,
                                 color = Color(0xFFE6EDF3),
-                                fontSize = 13.sp,
-                                fontFamily = FontFamily.Default,
-                                lineHeight = 18.sp
+                                fontSize = 14.sp,
+                                fontFamily = FontFamily.Monospace,
+                                lineHeight = 21.sp
                             )
                         }
                     }
@@ -2616,8 +2659,8 @@ fun MarkdownPreview(readme: String, baseUrl: String? = null, imageQuality: Strin
                             baseUrl = baseUrl,
                             searchQuery = searchQuery,
                             color = Color(0xFFC9D1D9),
-                            fontSize = 14.sp,
-                            lineHeight = 20.sp
+                            fontSize = 16.sp,
+                            lineHeight = 24.sp
                         )
                     }
                 }
@@ -2629,8 +2672,8 @@ fun MarkdownPreview(readme: String, baseUrl: String? = null, imageQuality: Strin
                             baseUrl = baseUrl,
                             searchQuery = searchQuery,
                             color = Color(0xFFC9D1D9),
-                            fontSize = 14.sp,
-                            lineHeight = 20.sp
+                            fontSize = 16.sp,
+                            lineHeight = 24.sp
                         )
                     }
                 }
@@ -2646,8 +2689,8 @@ fun MarkdownPreview(readme: String, baseUrl: String? = null, imageQuality: Strin
                             text = block.text,
                             baseUrl = baseUrl,
                             color = Color(0xFFC9D1D9),
-                            fontSize = 14.sp,
-                            lineHeight = 20.sp
+                            fontSize = 16.sp,
+                            lineHeight = 24.sp
                         )
                     }
                 }
@@ -2658,9 +2701,9 @@ fun MarkdownPreview(readme: String, baseUrl: String? = null, imageQuality: Strin
                             text = block.text,
                             baseUrl = baseUrl,
                             color = Color(0xFF8B949E),
-                            fontSize = 14.sp,
+                            fontSize = 16.sp,
                             modifier = Modifier.padding(start = 12.dp),
-                            lineHeight = 20.sp
+                            lineHeight = 24.sp
                         )
                     }
                 }
@@ -2730,7 +2773,7 @@ fun CodeContentsTab(viewModel: GitHubViewModel) {
 
     if (error != null) {
         Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-            Text("No files or Access restricted", color = Color.Gray, fontSize = 13.sp, fontFamily = FontFamily.Default)
+            Text("No files or Access restricted", color = Color.Gray, fontSize = 15.sp, fontFamily = FontFamily.Default)
         }
         return
     }
@@ -2750,7 +2793,7 @@ fun CodeContentsTab(viewModel: GitHubViewModel) {
             Text(
                 text = if (codePath.isEmpty()) "root" else codePath,
                 color = Color.White,
-                fontSize = 12.sp,
+                fontSize = 16.sp,
                 fontFamily = FontFamily.Default,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -2784,7 +2827,7 @@ fun CodeContentsTab(viewModel: GitHubViewModel) {
                         .padding(24.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("Directory is Empty", color = Color.Gray, fontSize = 12.sp, fontFamily = FontFamily.Default)
+                    Text("Directory is Empty", color = Color.Gray, fontSize = 16.sp, fontFamily = FontFamily.Default)
                 }
             } else {
                 val repoOwner = viewModel.repoDetailData.value?.owner?.login ?: ""
@@ -2843,13 +2886,13 @@ fun CodeContentsTab(viewModel: GitHubViewModel) {
                                 imageVector = if (file.type == "dir") Icons.Default.Folder else Icons.Default.Description,
                                 contentDescription = null,
                                 tint = if (file.type == "dir") Color(0xFFBD93F9) else Color(0xFF8BE9FD),
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
                                 text = file.name,
                                 color = Color.White,
-                                fontSize = 13.sp,
+                                fontSize = 17.sp,
                                 fontFamily = FontFamily.Default,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -2889,7 +2932,7 @@ fun CodeContentsTab(viewModel: GitHubViewModel) {
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Default,
-                        fontSize = 13.sp
+                        fontSize = 15.sp
                     )
                 }
 
@@ -2938,7 +2981,7 @@ fun IssuesTab(viewModel: GitHubViewModel) {
                 ),
                 shape = RoundedCornerShape(0.dp)
             ) {
-                Text("OPEN ISSUES", fontWeight = FontWeight.Bold, fontSize = 11.sp, fontFamily = FontFamily.Default)
+                Text("OPEN ISSUES", fontWeight = FontWeight.Bold, fontSize = 13.sp, fontFamily = FontFamily.Default)
             }
             Button(
                 modifier = Modifier.weight(1f),
@@ -2949,7 +2992,7 @@ fun IssuesTab(viewModel: GitHubViewModel) {
                 ),
                 shape = RoundedCornerShape(0.dp)
             ) {
-                Text("CLOSED ISSUES", fontWeight = FontWeight.Bold, fontSize = 11.sp, fontFamily = FontFamily.Default)
+                Text("CLOSED ISSUES", fontWeight = FontWeight.Bold, fontSize = 13.sp, fontFamily = FontFamily.Default)
             }
         }
 
@@ -2964,14 +3007,14 @@ fun IssuesTab(viewModel: GitHubViewModel) {
 
         if (error != null) {
             Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                Text("Error: ${error}", color = Color.Gray, fontSize = 12.sp, fontFamily = FontFamily.Default)
+                Text("Error: ${error}", color = Color.Gray, fontSize = 14.sp, fontFamily = FontFamily.Default)
             }
             return
         }
 
         if (issues.isEmpty()) {
             Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                Text("No matching issues found", color = Color.Gray, fontSize = 13.sp, fontFamily = FontFamily.Default)
+                Text("No matching issues found", color = Color.Gray, fontSize = 15.sp, fontFamily = FontFamily.Default)
             }
         } else {
             LazyColumn(
@@ -2997,13 +3040,13 @@ fun IssuesTab(viewModel: GitHubViewModel) {
                                     text = "#${issue.number}",
                                     color = Color(0xFF00E5FF),
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
+                                    fontSize = 14.sp,
                                     fontFamily = FontFamily.Default
                                 )
                                 Text(
                                     text = issue.createdAt?.take(10) ?: "",
                                     color = Color.Gray,
-                                    fontSize = 11.sp,
+                                    fontSize = 13.sp,
                                     fontFamily = FontFamily.Default
                                 )
                             }
@@ -3012,7 +3055,7 @@ fun IssuesTab(viewModel: GitHubViewModel) {
                                 text = issue.title,
                                 color = Color.White,
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp,
+                                fontSize = 15.sp,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -3025,13 +3068,13 @@ fun IssuesTab(viewModel: GitHubViewModel) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.AccountCircle, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(12.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text(issue.user.login, color = Color.Gray, fontSize = 11.sp, fontFamily = FontFamily.Default)
+                                    Text(issue.user.login, color = Color.Gray, fontSize = 13.sp, fontFamily = FontFamily.Default)
                                 }
                                 if (issue.comments ?: 0 > 0) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(Icons.Default.Comment, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(12.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("${issue.comments}", color = Color.White, fontSize = 11.sp, fontFamily = FontFamily.Default)
+                                        Text("${issue.comments}", color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Default)
                                     }
                                 }
                             }
@@ -3061,7 +3104,7 @@ fun IssuesTab(viewModel: GitHubViewModel) {
                             text = "#${issue.number} // ${issue.state.uppercase()}",
                             color = Color(0xFF00E5FF),
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
+                            fontSize = 14.sp,
                             fontFamily = FontFamily.Default
                         )
                     }
@@ -3076,7 +3119,7 @@ fun IssuesTab(viewModel: GitHubViewModel) {
                     Text(
                         text = "Opened by ${issue.user.login}",
                         color = Color.Gray,
-                        fontSize = 11.sp,
+                        fontSize = 13.sp,
                         fontFamily = FontFamily.Default
                     )
                     
@@ -3096,7 +3139,7 @@ fun IssuesTab(viewModel: GitHubViewModel) {
                                 Text(
                                     text = if (issue.body.isNullOrBlank()) "[No Description provided]" else issue.body,
                                     color = Color.White.copy(alpha = 0.9f),
-                                    fontSize = 13.sp
+                                    fontSize = 15.sp
                                 )
                             }
                         }
@@ -3109,7 +3152,7 @@ fun IssuesTab(viewModel: GitHubViewModel) {
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color.Black),
                         shape = RoundedCornerShape(0.dp)
                     ) {
-                        Text("BACK", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Default, fontSize = 12.sp)
+                        Text("BACK", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Default, fontSize = 14.sp)
                     }
                 }
             }
@@ -3155,7 +3198,7 @@ fun CommitDiffView(file: GitHubCommitFile) {
                         text = file.filename,
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp,
+                        fontSize = 13.sp,
                         fontFamily = FontFamily.Default,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
@@ -3163,10 +3206,10 @@ fun CommitDiffView(file: GitHubCommitFile) {
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (file.additions > 0) {
-                        Text("+${file.additions}", color = Color(0xFF3FB950), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("+${file.additions}", color = Color(0xFF3FB950), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                     if (file.deletions > 0) {
-                        Text("-${file.deletions}", color = Color(0xFFF85149), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("-${file.deletions}", color = Color(0xFFF85149), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -3181,7 +3224,7 @@ fun CommitDiffView(file: GitHubCommitFile) {
                         .padding(12.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("No visual changes (binary or large asset file)", color = Color.Gray, fontSize = 11.sp)
+                    Text("No visual changes (binary or large asset file)", color = Color.Gray, fontSize = 13.sp)
                 }
             } else {
                 val patchLines = remember(patch) { patch.lines() }
@@ -3208,7 +3251,7 @@ fun CommitDiffView(file: GitHubCommitFile) {
                             Text(
                                 text = line,
                                 color = textColor,
-                                fontSize = 10.sp,
+                                fontSize = 12.sp,
                                 fontFamily = FontFamily.Default,
                                 fontWeight = FontWeight.Bold
                             )
@@ -3237,7 +3280,7 @@ fun CommitsTab(viewModel: GitHubViewModel) {
         if (detail != null) {
             val repoDetails = viewModel.repoDetailData.value
             if (repoDetails != null) {
-                viewModel.loadCommitDetail(repoDetails.owner.login, repoDetails.name, detail.sha)
+                viewModel.loadCommitDetail(repoDetails.owner.login, repoDetails.name, detail)
             }
         } else {
             viewModel.closeCommitDetail()
@@ -3253,14 +3296,14 @@ fun CommitsTab(viewModel: GitHubViewModel) {
 
     if (error != null) {
         Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-            Text("Error loading commits: ${error}", color = Color.Gray, fontSize = 12.sp, fontFamily = FontFamily.Default)
+            Text("Error loading commits: ${error}", color = Color.Gray, fontSize = 14.sp, fontFamily = FontFamily.Default)
         }
         return
     }
 
     if (commits.isEmpty()) {
         Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-            Text("No commits recorded", color = Color.Gray, fontSize = 13.sp, fontFamily = FontFamily.Default)
+            Text("No commits recorded", color = Color.Gray, fontSize = 15.sp, fontFamily = FontFamily.Default)
         }
     } else {
         LazyColumn(
@@ -3286,13 +3329,13 @@ fun CommitsTab(viewModel: GitHubViewModel) {
                                 text = item.sha.take(7),
                                 color = Color(0xFF00E5FF),
                                 fontWeight = FontWeight.ExtraBold,
-                                fontSize = 12.sp,
+                                fontSize = 14.sp,
                                 fontFamily = FontFamily.Default
                             )
                             Text(
                                 text = item.commit.author.date.take(10),
                                 color = Color.Gray,
-                                fontSize = 11.sp,
+                                fontSize = 13.sp,
                                 fontFamily = FontFamily.Default
                             )
                         }
@@ -3300,7 +3343,7 @@ fun CommitsTab(viewModel: GitHubViewModel) {
                         Text(
                             text = item.commit.message,
                             color = Color.White,
-                            fontSize = 13.sp,
+                            fontSize = 15.sp,
                             maxLines = 3,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -3311,7 +3354,7 @@ fun CommitsTab(viewModel: GitHubViewModel) {
                             Text(
                                 text = item.commit.author.name,
                                 color = Color.Gray,
-                                fontSize = 11.sp,
+                                fontSize = 13.sp,
                                 fontFamily = FontFamily.Default
                             )
                         }
@@ -3358,19 +3401,19 @@ fun CommitsTab(viewModel: GitHubViewModel) {
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             item {
-                                Text("SHA HASH:", color = Color.Gray, fontSize = 10.sp, fontFamily = FontFamily.Default)
-                                Text(commit.sha, color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Default, fontWeight = FontWeight.Bold)
+                                Text("SHA HASH:", color = Color.Gray, fontSize = 12.sp, fontFamily = FontFamily.Default)
+                                Text(commit.sha, color = Color.White, fontSize = 14.sp, fontFamily = FontFamily.Default, fontWeight = FontWeight.Bold)
 
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Text("AUTHOR:", color = Color.Gray, fontSize = 10.sp, fontFamily = FontFamily.Default)
-                                Text("${commit.commit.author.name} <${commit.commit.author.email}>", color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Default)
+                                Text("AUTHOR:", color = Color.Gray, fontSize = 12.sp, fontFamily = FontFamily.Default)
+                                Text("${commit.commit.author.name} <${commit.commit.author.email}>", color = Color.White, fontSize = 14.sp, fontFamily = FontFamily.Default)
 
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Text("TIMESTAMP/DATE:", color = Color.Gray, fontSize = 10.sp, fontFamily = FontFamily.Default)
-                                Text(commit.commit.author.date, color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Default)
+                                Text("TIMESTAMP/DATE:", color = Color.Gray, fontSize = 12.sp, fontFamily = FontFamily.Default)
+                                Text(commit.commit.author.date, color = Color.White, fontSize = 14.sp, fontFamily = FontFamily.Default)
 
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Text("FULL MESSAGE:", color = Color.Gray, fontSize = 10.sp, fontFamily = FontFamily.Default)
+                                Text("FULL MESSAGE:", color = Color.Gray, fontSize = 12.sp, fontFamily = FontFamily.Default)
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -3381,13 +3424,13 @@ fun CommitsTab(viewModel: GitHubViewModel) {
                                     Text(
                                         text = commit.commit.message,
                                         color = Color.White,
-                                        fontSize = 12.sp,
+                                        fontSize = 14.sp,
                                         fontFamily = FontFamily.Default
                                     )
                                 }
 
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Text("FILES CHANGED & CODE DIFFS:", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold, fontSize = 11.sp, fontFamily = FontFamily.Default)
+                                Text("FILES CHANGED & CODE DIFFS:", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold, fontSize = 13.sp, fontFamily = FontFamily.Default)
                                 Spacer(modifier = Modifier.height(4.dp))
                             }
 
@@ -3407,7 +3450,7 @@ fun CommitsTab(viewModel: GitHubViewModel) {
                                     Text(
                                         text = "Failed to load code diffs: $detailedCommitError",
                                         color = Color.Red,
-                                        fontSize = 11.sp,
+                                        fontSize = 13.sp,
                                         fontFamily = FontFamily.Default
                                     )
                                 }
@@ -3415,7 +3458,7 @@ fun CommitsTab(viewModel: GitHubViewModel) {
                                 val filesList = detailedCommitState!!.files!!
                                 if (filesList.isEmpty()) {
                                     item {
-                                        Text("No files were modified in this commit.", color = Color.Gray, fontSize = 11.sp, fontFamily = FontFamily.Default)
+                                        Text("No files were modified in this commit.", color = Color.Gray, fontSize = 13.sp, fontFamily = FontFamily.Default)
                                     }
                                 } else {
                                     items(filesList) { file ->
@@ -3454,7 +3497,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
 
     if (error != null) {
         Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-            Text("Error fetching releases", color = Color.Gray, fontSize = 12.sp, fontFamily = FontFamily.Default)
+            Text("Error fetching releases", color = Color.Gray, fontSize = 14.sp, fontFamily = FontFamily.Default)
         }
         return
     }
@@ -3468,7 +3511,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
     ) {
         if (releases.isEmpty()) {
             Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                Text("No releases available", color = Color.Gray, fontSize = 12.sp, fontFamily = FontFamily.Default)
+                Text("No releases available", color = Color.Gray, fontSize = 14.sp, fontFamily = FontFamily.Default)
             }
         } else {
             // Custom compact search box for releases
@@ -3490,7 +3533,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                     onValueChange = { releaseSearchQuery = it },
                     modifier = Modifier.fillMaxSize(),
                     textStyle = androidx.compose.ui.text.TextStyle(
-                        fontSize = 12.sp,
+                        fontSize = 14.sp,
                         color = Color.White
                     ),
                     cursorBrush = SolidColor(Color.White),
@@ -3515,7 +3558,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                     Text(
                                         "Search releases...",
                                         color = Color(0xFF8B949E),
-                                        fontSize = 12.sp
+                                        fontSize = 14.sp
                                     )
                                 }
                                 innerTextField()
@@ -3562,7 +3605,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
 
             if (filteredReleases.isEmpty()) {
                 Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                    Text("No releases match your search", color = Color.Gray, fontSize = 12.sp, fontFamily = FontFamily.Default)
+                    Text("No releases match your search", color = Color.Gray, fontSize = 14.sp, fontFamily = FontFamily.Default)
                 }
             } else {
                 filteredReleases.forEach { release ->
@@ -3585,7 +3628,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                         AnnotatedString(release.name ?: release.tagName),
                                     color = Color(0xFF00E5FF),
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
+                                    fontSize = 15.sp,
                                     fontFamily = FontFamily.Default,
                                     modifier = Modifier.weight(1f)
                                 )
@@ -3601,7 +3644,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                         else
                                             AnnotatedString(release.tagName),
                                         color = Color.White,
-                                        fontSize = 10.sp,
+                                        fontSize = 12.sp,
                                         fontFamily = FontFamily.Default
                                     )
                                 }
@@ -3611,7 +3654,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                 Text(
                                     text = release.publishedAt.take(10),
                                     color = Color(0xFF8B949E),
-                                    fontSize = 10.sp,
+                                    fontSize = 12.sp,
                                     fontFamily = FontFamily.Default
                                 )
                             }
@@ -3623,7 +3666,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                     else
                                         AnnotatedString(release.body ?: ""),
                                     color = Color.LightGray,
-                                    fontSize = 11.sp,
+                                    fontSize = 13.sp,
                                     maxLines = 4,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier
@@ -3639,7 +3682,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                 Text(
                                     text = "View release notes...",
                                     color = Color(0xFF00E5FF),
-                                    fontSize = 11.sp,
+                                    fontSize = 13.sp,
                                     fontFamily = FontFamily.Default,
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -3680,7 +3723,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                         text = "Assets ($assetsCount)",
                                         color = Color.White,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp,
+                                        fontSize = 13.sp,
                                         fontFamily = FontFamily.Default
                                     )
                                 }
@@ -3717,7 +3760,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                                 Text(
                                                     text = asset.name,
                                                     color = Color.White,
-                                                    fontSize = 12.sp,
+                                                    fontSize = 14.sp,
                                                     fontFamily = FontFamily.Default,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis
@@ -3727,7 +3770,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                             Text(
                                                 text = if (kbSize > 1024) "${kbSize / 1024} MB" else "${kbSize} KB",
                                                 color = Color.Gray,
-                                                fontSize = 11.sp,
+                                                fontSize = 13.sp,
                                                 fontFamily = FontFamily.Default
                                             )
                                         }
@@ -3764,14 +3807,14 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                                 Text(
                                                     text = "Source code (zip)",
                                                     color = Color.White,
-                                                    fontSize = 12.sp,
+                                                    fontSize = 14.sp,
                                                     fontFamily = FontFamily.Default
                                                 )
                                             }
                                             Text(
                                                 text = "ZIP Source",
                                                 color = Color.Gray,
-                                                fontSize = 11.sp,
+                                                fontSize = 13.sp,
                                                 fontFamily = FontFamily.Default
                                             )
                                         }
@@ -3808,14 +3851,14 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                                 Text(
                                                     text = "Source code (tar.gz)",
                                                     color = Color.White,
-                                                    fontSize = 12.sp,
+                                                    fontSize = 14.sp,
                                                     fontFamily = FontFamily.Default
                                                 )
                                             }
                                             Text(
                                                 text = "TAR.GZ Source",
                                                 color = Color.Gray,
-                                                fontSize = 11.sp,
+                                                fontSize = 13.sp,
                                                 fontFamily = FontFamily.Default
                                             )
                                         }
@@ -3880,7 +3923,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                     Text(
                         text = release.tagName,
                         color = Color(0xFF8B949E),
-                        fontSize = 12.sp,
+                        fontSize = 14.sp,
                         fontFamily = FontFamily.Default
                     )
 
@@ -3913,7 +3956,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                         Text(
                                             "Scraping release notes from GitHub...",
                                             color = Color.Gray,
-                                            fontSize = 11.sp,
+                                            fontSize = 13.sp,
                                             fontFamily = FontFamily.Default
                                         )
                                     }
@@ -3928,7 +3971,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                     Text(
                                         text = releaseNotesContent!!,
                                         color = Color.LightGray,
-                                        fontSize = 12.sp,
+                                        fontSize = 14.sp,
                                         fontFamily = FontFamily.Default
                                     )
                                 }
@@ -3938,7 +3981,7 @@ fun ReleasesTab(viewModel: GitHubViewModel) {
                                 Text(
                                     text = release.body ?: "No release notes available.",
                                     color = Color.Gray,
-                                    fontSize = 12.sp,
+                                    fontSize = 14.sp,
                                     fontFamily = FontFamily.Default
                                 )
                             }
@@ -3985,7 +4028,7 @@ fun UserProfileScreen(viewModel: GitHubViewModel, username: String) {
             Spacer(modifier = Modifier.height(12.dp))
             Text("User profiles lookup failed", color = Color.White, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(6.dp))
-            Text(error!!, color = Color.Gray, fontSize = 12.sp, fontFamily = FontFamily.Default)
+            Text(error!!, color = Color.Gray, fontSize = 14.sp, fontFamily = FontFamily.Default)
             Spacer(modifier = Modifier.height(16.dp))
             Button(
                 onClick = { viewModel.loadUserProfile(username) },
@@ -4060,7 +4103,7 @@ fun UserProfileScreen(viewModel: GitHubViewModel, username: String) {
                             text = "@${profile.login}",
                             color = Color(0xFF00E5FF),
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
+                            fontSize = 15.sp,
                             fontFamily = FontFamily.Default
                         )
                         if (!profile.location.isNullOrEmpty()) {
@@ -4068,7 +4111,7 @@ fun UserProfileScreen(viewModel: GitHubViewModel, username: String) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.LocationOn, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(12.dp))
                                 Spacer(modifier = Modifier.width(3.dp))
-                                Text(profile.location, color = Color.Gray, fontSize = 11.sp)
+                                Text(profile.location, color = Color.Gray, fontSize = 13.sp)
                             }
                         }
                     }
@@ -4086,9 +4129,9 @@ fun UserProfileScreen(viewModel: GitHubViewModel, username: String) {
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF020202))
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("BIO", color = Color(0xFF00E5FF), fontWeight = FontWeight.Black, fontSize = 11.sp, fontFamily = FontFamily.Default)
+                        Text("BIO", color = Color(0xFF00E5FF), fontWeight = FontWeight.Black, fontSize = 13.sp, fontFamily = FontFamily.Default)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(profile.bio, color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+                        Text(profile.bio, color = Color.White.copy(alpha = 0.9f), fontSize = 15.sp)
                     }
                 }
             }
@@ -4112,7 +4155,7 @@ fun UserProfileScreen(viewModel: GitHubViewModel, username: String) {
                 text = "USER REPOSITORIES (${repos.size})",
                 color = Color(0xFF00E5FF),
                 fontWeight = FontWeight.ExtraBold,
-                fontSize = 12.sp,
+                fontSize = 14.sp,
                 fontFamily = FontFamily.Default
             )
         }
@@ -4120,7 +4163,7 @@ fun UserProfileScreen(viewModel: GitHubViewModel, username: String) {
         if (repos.isEmpty()) {
             item {
                 Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                    Text("No public repositories discovered", color = Color.Gray, fontSize = 12.sp, fontFamily = FontFamily.Default)
+                    Text("No public repositories discovered", color = Color.Gray, fontSize = 14.sp, fontFamily = FontFamily.Default)
                 }
             }
         } else {
@@ -4152,6 +4195,9 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
     var inputUser by remember { mutableStateOf(savedUser ?: "") }
     var keyVisible by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val cacheClearing by viewModel.cacheClearing.collectAsState()
+    val cachesCleared by viewModel.cachesCleared.collectAsState()
+    var showCacheClearDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -4178,14 +4224,14 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                                 color = Color(0xFFFFA726),
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Default,
-                                fontSize = 12.sp
+                                fontSize = 14.sp
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = "Limited to 60 requests per hour. Generate a GitHub Personal Access Token below to lift this restriction and access private repositories.",
                             color = Color(0xFFBB8F4A),
-                            fontSize = 11.sp,
+                            fontSize = 13.sp,
                             fontFamily = FontFamily.Default
                         )
                     }
@@ -4210,7 +4256,7 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                             color = Color(0xFF00E5FF),
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Default,
-                            fontSize = 12.sp
+                            fontSize = 14.sp
                         )
                     }
                     Spacer(modifier = Modifier.height(12.dp))
@@ -4245,7 +4291,7 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                     Text(
                         text = "Leave empty to browse anonymously (limited to 60 queries/hr). Generate a personal token at github.com/settings/tokens to lift restrictions.",
                         color = Color.Gray,
-                        fontSize = 11.sp
+                        fontSize = 13.sp
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     if (inputToken != (currentToken ?: "")) {
@@ -4258,7 +4304,7 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color.Black),
                             shape = RoundedCornerShape(4.dp)
                         ) {
-                            Text("SAVE AND UPDATE PAT", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Default, fontSize = 12.sp)
+                            Text("SAVE AND UPDATE PAT", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Default, fontSize = 14.sp)
                         }
                     }
                 }
@@ -4285,7 +4331,7 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                             color = Color(0xFF00E5FF),
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Default,
-                            fontSize = 12.sp
+                            fontSize = 14.sp
                         )
                     }
                     Spacer(modifier = Modifier.height(12.dp))
@@ -4319,20 +4365,20 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color.Black),
                             shape = RoundedCornerShape(4.dp)
                         ) {
-                            Text("SAVE DEFAULT USER", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Default, fontSize = 12.sp)
+                            Text("SAVE DEFAULT USER", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Default, fontSize = 14.sp)
                         }
                     }
                 }
             }
         }
 
-        // Proxy Configuration Card
+        // IP Rotation Configuration Card
         item {
-            val proxyListState by viewModel.proxyList.collectAsState()
+            val ipPoolState by viewModel.ipPool.collectAsState()
             val uaEnabled by viewModel.uaRotationEnabled.collectAsState()
-            var proxyInput by remember { mutableStateOf(proxyListState.joinToString("\n")) }
+            var ipInput by remember { mutableStateOf(ipPoolState.joinToString("\n")) }
             var uaToggle by remember(uaEnabled) { mutableStateOf(uaEnabled) }
-            val activeCount = RetrofitClient.proxySelector.proxyCount()
+            val activeCount = RetrofitClient.ipPoolSize()
 
             Card(
                 modifier = Modifier
@@ -4345,18 +4391,18 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                         Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFF00E5FF))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "RATE LIMIT EVASION",
+                            text = "IP ROTATION / RATE LIMIT EVASION",
                             color = Color(0xFF00E5FF),
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Default,
-                            fontSize = 12.sp
+                            fontSize = 14.sp
                         )
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Rotate proxies and user-agents to bypass IP-based rate limiting and WAF fingerprinting.",
+                        text = "Cycle a pool of IP identities and user-agents on every request to avoid IP-based rate limiting and WAF fingerprinting. Each request moves to the next IP in the ring.",
                         color = Color.Gray,
-                        fontSize = 11.sp,
+                        fontSize = 15.sp,
                         fontFamily = FontFamily.Default
                     )
 
@@ -4373,13 +4419,13 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                                 text = "USER-AGENT ROTATION",
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
+                                fontSize = 15.sp,
                                 fontFamily = FontFamily.Default
                             )
                             Text(
                                 text = "Cycle browser UAs on each request",
                                 color = Color.Gray,
-                                fontSize = 10.sp,
+                                fontSize = 14.sp,
                                 fontFamily = FontFamily.Default
                             )
                         }
@@ -4400,23 +4446,23 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Proxy list
+                    // IP pool
                     Text(
-                        text = "PROXY POOL (one per line, format: host:port)",
+                        text = "IP POOL (one IPv4 / IPv6 per line)",
                         color = Color(0xFF8B949E),
                         fontWeight = FontWeight.Bold,
-                        fontSize = 10.sp,
+                        fontSize = 14.sp,
                         fontFamily = FontFamily.Default
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     OutlinedTextField(
-                        value = proxyInput,
-                        onValueChange = { proxyInput = it },
+                        value = ipInput,
+                        onValueChange = { ipInput = it },
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = 80.dp),
                         textStyle = androidx.compose.ui.text.TextStyle(
-                            fontSize = 11.sp,
+                            fontSize = 15.sp,
                             color = Color.White,
                             fontFamily = FontFamily.Default
                         ),
@@ -4429,9 +4475,9 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                         ),
                         placeholder = {
                             Text(
-                                text = "192.168.1.1:8080\n203.0.113.5:3128\n10.0.0.1:8888",
+                                text = "203.0.113.5\n198.51.100.24\n2001:db8::1",
                                 color = Color(0xFF555555),
-                                fontSize = 11.sp,
+                                fontSize = 15.sp,
                                 fontFamily = FontFamily.Default
                             )
                         },
@@ -4439,28 +4485,28 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = if (activeCount > 0) "$activeCount proxies active" else "No proxies configured — using direct connection",
+                        text = if (activeCount > 0) "$activeCount IPs in rotation" else "No IPs configured — using direct connection",
                         color = if (activeCount > 0) Color(0xFF50FA7B) else Color.Gray,
-                        fontSize = 10.sp,
+                        fontSize = 14.sp,
                         fontFamily = FontFamily.Default
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    val hasProxyChanged = proxyInput.trim() != proxyListState.joinToString("\n").trim()
-                    if (hasProxyChanged) {
+                    val hasIpChanged = ipInput.trim() != ipPoolState.joinToString("\n").trim()
+                    if (hasIpChanged) {
                         Button(
                             modifier = Modifier.fillMaxWidth(),
                             onClick = {
                                 keyboardController?.hide()
-                                val entries = proxyInput
+                                val entries = ipInput
                                     .split("\n")
                                     .map { it.trim() }
                                     .filter { it.isNotBlank() }
-                                viewModel.saveProxyList(entries)
+                                viewModel.saveIpPool(entries)
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color.Black),
                             shape = RoundedCornerShape(4.dp)
                         ) {
-                            Text("SAVE PROXY LIST", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Default, fontSize = 12.sp)
+                            Text("SAVE IP POOL", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Default, fontSize = 14.sp)
                         }
                     }
                 }
@@ -4485,14 +4531,14 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                             color = Color(0xFF00E5FF),
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Default,
-                            fontSize = 12.sp
+                            fontSize = 14.sp
                         )
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "Show avatar, profile pics, and file images inside the client application.",
                         color = Color.Gray,
-                        fontSize = 12.sp
+                        fontSize = 14.sp
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Row(
@@ -4515,7 +4561,7 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                                     text = option,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Default,
-                                    fontSize = 11.sp
+                                    fontSize = 13.sp
                                 )
                             }
                         }
@@ -4542,14 +4588,14 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                             color = Color(0xFF00E5FF),
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Default,
-                            fontSize = 12.sp
+                            fontSize = 14.sp
                         )
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "Support previewing and loading of inline images embedded inside README files.",
                         color = Color.Gray,
-                        fontSize = 12.sp
+                        fontSize = 14.sp
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Row(
@@ -4572,7 +4618,7 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                                     text = option,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Default,
-                                    fontSize = 11.sp
+                                    fontSize = 13.sp
                                 )
                             }
                         }
@@ -4580,6 +4626,127 @@ fun SettingsScreen(viewModel: GitHubViewModel) {
                 }
             }
         }
+
+        // Cache maintenance
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Color(0xFF222222), RoundedCornerShape(8.dp)),
+                colors = CardDefaults.cardColors(containerColor = Color.Black)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = Color(0xFF00E5FF))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "STORAGE & CACHE",
+                            color = Color(0xFF00E5FF),
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Default,
+                            fontSize = 14.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Clear HTTP response caches, the release/commit/notes mirror, file-tree snapshots and image caches. Bookmarks, search history, tokens and settings are kept.",
+                        color = Color.Gray,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { showCacheClearDialog = true },
+                        enabled = !cacheClearing,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF111111),
+                            contentColor = Color(0xFFFF6B6B),
+                            disabledContainerColor = Color(0xFF111111),
+                            disabledContentColor = Color.Gray
+                        ),
+                        shape = RoundedCornerShape(4.dp),
+                        border = BorderStroke(1.dp, Color(0xFF3A1E1E))
+                    ) {
+                        if (cacheClearing) {
+                            CircularProgressIndicator(
+                                color = Color(0xFF00E5FF),
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "CLEARING...",
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Default,
+                                fontSize = 14.sp
+                            )
+                        } else {
+                            Text(
+                                "CLEAR ALL CACHES",
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Default,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                    if (cachesCleared) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "All caches cleared.",
+                            color = Color(0xFF50FA7B),
+                            fontSize = 13.sp,
+                            fontFamily = FontFamily.Default
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (showCacheClearDialog) {
+        AlertDialog(
+            onDismissRequest = { showCacheClearDialog = false },
+            title = {
+                Text(
+                    "Clear all caches?",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Default
+                )
+            },
+            text = {
+                Text(
+                    "This removes cached API responses, release notes, commit patches, file trees and images. Your bookmarks and search history will not be touched.",
+                    color = Color.LightGray,
+                    fontSize = 14.sp,
+                    fontFamily = FontFamily.Default
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showCacheClearDialog = false
+                    viewModel.clearAllCaches()
+                }) {
+                    Text(
+                        "CLEAR",
+                        color = Color(0xFFFF6B6B),
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Default
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCacheClearDialog = false }) {
+                    Text(
+                        "CANCEL",
+                        color = Color(0xFF00E5FF),
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Default
+                    )
+                }
+            },
+            containerColor = Color(0xFF0A0A0A)
+        )
     }
 }
 
@@ -4606,7 +4773,7 @@ fun StatBox(label: String, value: String, modifier: Modifier = Modifier) {
             Text(
                 text = label,
                 color = Color.Gray,
-                fontSize = 9.sp,
+                fontSize = 12.sp,
                 fontFamily = FontFamily.Default,
                 fontWeight = FontWeight.Bold
             )
@@ -4625,7 +4792,7 @@ fun UnitBadge(label: String, color: Color) {
         Text(
             text = label,
             color = color,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Default
         )
@@ -4660,6 +4827,7 @@ fun FileViewScreen(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val fileName = path.substringAfterLast('/')
+    val focusManager = LocalFocusManager.current
     
     val activeViewFileName by viewModel.activeViewFileName.collectAsState()
     val activeViewFileContent by viewModel.activeViewFileContent.collectAsState()
@@ -4683,32 +4851,115 @@ fun FileViewScreen(
     // Search match navigation state
     var currentMatchIndex by remember { mutableIntStateOf(0) }
     var totalMatchCount by remember { mutableIntStateOf(0) }
+    val fileLines = remember(activeViewFileContent) {
+        if (activeViewFileContent.isEmpty()) emptyList() else activeViewFileContent.lines()
+    }
     val searchMatchLines = remember(searchQuery, activeViewFileContent) {
-        if (searchQuery.isBlank() || activeViewFileContent.isEmpty()) emptyList()
+        if (searchQuery.isBlank() || fileLines.isEmpty()) emptyList()
         else {
             val query = searchQuery
-            activeViewFileContent.lines()
-                .mapIndexedNotNull { index, line ->
-                    if (line.contains(query, ignoreCase = true)) index else null
-                }
+            fileLines.mapIndexedNotNull { index, line ->
+                if (line.contains(query, ignoreCase = true)) index else null
+            }
         }
     }
+    val searchMatchLineSet = remember(searchMatchLines) { searchMatchLines.toSet() }
     // Keep match count and index in sync
     LaunchedEffect(searchMatchLines.size) {
         totalMatchCount = searchMatchLines.size
         if (currentMatchIndex >= searchMatchLines.size) currentMatchIndex = 0
     }
 
-    // Shared vertical scroll state for the code viewer (used by search navigation)
-    val fileViewVerticalScrollState = rememberScrollState()
-    val density = androidx.compose.ui.platform.LocalDensity.current
+    // Lazy viewer state: only visible lines are composed/laid out, and search
+    // navigation scrolls directly to the matching logical line.
+    val fileListState = rememberLazyListState()
+    // One scroll state for the whole code canvas. The old code attached the
+    // same state to every line's own horizontalScroll; each line has a
+    // different max value, which is what made sideways panning stick and
+    // lines drift out of sync with each other.
+    val sharedHorizontalScrollState = rememberScrollState()
 
-    // Scroll to the current match line when navigating
-    LaunchedEffect(currentMatchIndex, searchMatchLines) {
-        if (searchMatchLines.isNotEmpty() && currentMatchIndex < searchMatchLines.size) {
-            val targetLine = searchMatchLines[currentMatchIndex]
-            val lineHeightPx = with(density) { 18.dp.toPx() }
-            fileViewVerticalScrollState.animateScrollTo((targetLine * lineHeightPx).toInt())
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val codeLineHeight = 22.sp
+    // includeFontPadding = false and an explicit lineHeight make every line
+    // occupy exactly the same box. Without it, lines containing emoji, CJK or
+    // other fallback glyphs measure taller than plain ASCII ones, which showed
+    // up as random vertical gaps and drifting line numbers.
+    val codeTextStyle = remember {
+        TextStyle(
+            color = Color(0xFFC9D1D9),
+            fontSize = 15.sp,
+            lineHeight = codeLineHeight,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Normal,
+            platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+        )
+    }
+    // Same metrics as the code text so number and code share one baseline.
+    val gutterTextStyle = remember {
+        TextStyle(
+            color = Color(0xFF484F58),
+            fontSize = 14.sp,
+            lineHeight = codeLineHeight,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Medium,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+        )
+    }
+    // One fixed row height for every line: the LazyColumn can never grow a row
+    // because of a glyph's font metrics.
+    val codeRowHeight = with(density) { codeLineHeight.toDp() }
+    // Monospace advance width: used to size the scrollable canvas and to
+    // compute a match's horizontal position without laying out the whole file.
+    val codeCharWidthPx = remember(textMeasurer, codeTextStyle) {
+        textMeasurer.measure(AnnotatedString("M"), codeTextStyle).size.width.toFloat()
+    }
+    val gutterDigitWidthPx = remember(textMeasurer) {
+        textMeasurer.measure(
+            AnnotatedString("0"),
+            TextStyle(
+                fontSize = 14.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Medium
+            )
+        ).size.width.toFloat()
+    }
+    val gutterWidth = with(density) {
+        val digits = fileLines.size.coerceAtLeast(1).toString().length
+        (digits * gutterDigitWidthPx).toDp() + 18.dp
+    }
+    val longestLineWidthPx = remember(fileLines, codeCharWidthPx, textMeasurer, codeTextStyle) {
+        val longest = fileLines.maxByOrNull { it.length } ?: ""
+        if (longest.length <= 1000) {
+            textMeasurer.measure(AnnotatedString(longest), codeTextStyle).size.width.toFloat()
+        } else {
+            longest.length * codeCharWidthPx
+        }
+    }
+
+    LaunchedEffect(currentMatchIndex, searchMatchLines, searchQuery, isPreviewMode) {
+        if (!isPreviewMode && searchMatchLines.isNotEmpty() && currentMatchIndex in searchMatchLines.indices) {
+            val lineIndex = searchMatchLines[currentMatchIndex]
+            fileListState.animateScrollToItem(lineIndex)
+
+            // Vertical is not enough: the match may be far to the right on a
+            // long line, so bring its column into view horizontally too.
+            val line = fileLines.getOrNull(lineIndex).orEmpty()
+            val column = line.indexOf(searchQuery, ignoreCase = true)
+            if (column >= 0) {
+                val prefix = line.substring(0, column)
+                val prefixWidthPx = if (prefix.length <= 512) {
+                    textMeasurer.measure(AnnotatedString(prefix), codeTextStyle).size.width.toFloat()
+                } else {
+                    column * codeCharWidthPx
+                }
+                val gutterPx = with(density) { gutterWidth.toPx() }
+                sharedHorizontalScrollState.scrollTo(
+                    (gutterPx + prefixWidthPx - with(density) { 24.dp.toPx() }).toInt()
+                )
+            }
         }
     }
 
@@ -4758,9 +5009,10 @@ fun FileViewScreen(
                         searchQuery = it
                         currentMatchIndex = 0
                     },
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize(),
                     textStyle = androidx.compose.ui.text.TextStyle(
-                        fontSize = 12.sp,
+                        fontSize = 14.sp,
                         color = Color.White
                     ),
                     cursorBrush = SolidColor(Color.White),
@@ -4785,7 +5037,7 @@ fun FileViewScreen(
                                     Text(
                                         "Find text in file...",
                                         color = Color(0xFF8B949E),
-                                        fontSize = 12.sp
+                                        fontSize = 14.sp
                                     )
                                 }
                                 innerTextField()
@@ -4817,7 +5069,7 @@ fun FileViewScreen(
                 Text(
                     text = "${currentMatchIndex + 1}/$totalMatchCount",
                     color = Color(0xFF8B949E),
-                    fontSize = 11.sp,
+                    fontSize = 13.sp,
                     fontFamily = FontFamily.Default,
                     fontWeight = FontWeight.Medium
                 )
@@ -4858,7 +5110,7 @@ fun FileViewScreen(
                 ) {
                     Icon(if (isPreviewMode) Icons.Default.Code else Icons.Default.Preview, contentDescription = "Toggle Preview", modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(if (isPreviewMode) "Code" else "Preview", fontWeight = FontWeight.SemiBold, fontSize = 10.sp)
+                    Text(if (isPreviewMode) "Code" else "Preview", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                 }
             }
 
@@ -4882,7 +5134,7 @@ fun FileViewScreen(
             ) {
                 Icon(Icons.Default.Download, contentDescription = "Download Raw File", tint = Color.White, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Raw", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 10.sp)
+                Text("Raw", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
             }
         }
 
@@ -4891,39 +5143,21 @@ fun FileViewScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .border(1.dp, Color(0xFF30363D), RoundedCornerShape(6.dp)),
+                .border(1.dp, Color(0xFF30363D), RoundedCornerShape(6.dp))
+                .clearFocusOnTap(focusManager),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF090D13)), // Deep black-gray inside code viewer
             shape = RoundedCornerShape(6.dp)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Header of the card (identical to Github File Header)
-                Row(
+                // Card header: line count, size and copy action only. The
+                // filename is already the screen title in the top app bar.
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Color(0xFF161B22))
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Description,
-                            contentDescription = "File",
-                            tint = Color(0xFF8B949E),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = fileName,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    
-                    val linesCount = activeViewFileContent.lines().size
+                    val linesCount = fileLines.size
                     val byteCount = activeViewFileContent.length
                     val sizeFormatted = when {
                         byteCount >= 1024 * 1024 -> String.format(java.util.Locale.US, "%.1f MB", byteCount.toFloat() / (1024 * 1024))
@@ -4931,13 +5165,14 @@ fun FileViewScreen(
                         else -> "$byteCount Bytes"
                     }
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = "$linesCount lines • $sizeFormatted",
                             color = Color(0xFF8B949E),
-                            fontSize = 11.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Medium
                         )
                         IconButton(
@@ -4948,13 +5183,13 @@ fun FileViewScreen(
                                 }
                             },
                             enabled = activeViewFileContent.isNotEmpty() && !activeViewFileLoading && activeViewFileError == null,
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(32.dp)
                         ) {
                             Icon(
                                 imageVector = if (justCopied) Icons.Default.Check else Icons.Default.ContentCopy,
                                 contentDescription = "Copy file content",
                                 tint = if (justCopied) Color(0xFF3FB950) else Color(0xFF8B949E),
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
@@ -4975,7 +5210,7 @@ fun FileViewScreen(
                         }
                     } else if (activeViewFileError != null) {
                         Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-                            Text(text = activeViewFileError!!, color = Color(0xFFF85149), fontSize = 12.sp)
+                            Text(text = activeViewFileError!!, color = Color(0xFFF85149), fontSize = 14.sp)
                         }
                     } else {
                         if (isPreviewMode && activeViewFileContent.isNotEmpty()) {
@@ -5014,65 +5249,103 @@ fun FileViewScreen(
                                 }
                             } else if (isImageFile && (imageQuality == "DISABLE" || imageQuality == "OFF")) {
                                 Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-                                    Text(text = "[Image Viewing Disabled in Settings]", color = Color(0xFF8B949E), fontFamily = FontFamily.Default, fontSize = 12.sp)
+                                    Text(text = "[Image Viewing Disabled in Settings]", color = Color(0xFF8B949E), fontFamily = FontFamily.Default, fontSize = 14.sp)
                                 }
                             } else {
-                                val verticalScrollState = fileViewVerticalScrollState
-                                val horizontalScrollState = rememberScrollState()
-                                
-                                val lineNumbersText = remember(activeViewFileContent) {
-                                    val lineCount = activeViewFileContent.lines().size
-                                    (1..lineCount).joinToString("\n") { it.toString() }
-                                }
-                                val highlightedCodeState = produceState<AnnotatedString>(
-                                    initialValue = AnnotatedString(activeViewFileContent),
+                                // Highlighting runs off the main thread. While it is
+                                // cooking (or for very large files) plain per-line text
+                                // is shown immediately, so scrolling/back never blocks.
+                                val highlightedLinesState = produceState<List<AnnotatedString>?>(
+                                    initialValue = null,
                                     key1 = activeViewFileContent,
-                                    key2 = fileName,
-                                    key3 = searchQuery
+                                    key2 = fileName
                                 ) {
+                                    if (activeViewFileContent.isEmpty()) {
+                                        value = emptyList()
+                                        return@produceState
+                                    }
                                     value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                                        highlightCode(activeViewFileContent, fileName, searchQuery)
+                                        // Detail is still fully readable/scrollable; only the
+                                        // expensive token pass is skipped on heavy files.
+                                        val tooLarge = fileLines.size > 3000 || activeViewFileContent.length > 1_000_000
+                                        if (tooLarge) null
+                                        else splitAnnotatedLines(highlightCode(activeViewFileContent, fileName))
                                     }
                                 }
-                                val highlightedCode = highlightedCodeState.value
+                                val highlightedLines = highlightedLinesState.value
 
                                 SelectionContainer {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .verticalScroll(verticalScrollState)
-                                    ) {
-                                        // Beautiful Line Numbers column (Gutter)
-                                        Text(
-                                            text = lineNumbersText,
-                                            color = Color(0xFF484F58),
-                                            fontSize = 11.sp,
-                                            fontFamily = FontFamily.Default,
-                                            fontWeight = FontWeight.Medium,
-                                            textAlign = androidx.compose.ui.text.style.TextAlign.End,
-                                            modifier = Modifier
-                                                .padding(end = 12.dp, start = 8.dp, top = 8.dp)
-                                                .widthIn(min = 28.dp)
-                                        )
-
-                                        // Code lines
+                                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                                        val viewportWidthPx = constraints.maxWidth.toFloat()
+                                        val contentWidth = with(density) {
+                                            maxOf(
+                                                viewportWidthPx,
+                                                gutterWidth.toPx() + longestLineWidthPx + 24.dp.toPx()
+                                            ).toDp()
+                                        }
+                                        // One scroll surface for the whole canvas: every line
+                                        // moves together, and short lines no longer cap the
+                                        // scroll range for long ones.
                                         Box(
                                             modifier = Modifier
-                                                .weight(1f)
-                                                .horizontalScroll(horizontalScrollState)
-                                                .padding(top = 8.dp, bottom = 8.dp, end = 12.dp)
+                                                .fillMaxSize()
+                                                .horizontalScroll(sharedHorizontalScrollState)
                                         ) {
-                                            Text(
-                                                text = highlightedCode,
-                                                color = Color(0xFFC9D1D9),
-                                                fontSize = 11.sp,
-                                                fontFamily = FontFamily.Default,
-                                                fontWeight = FontWeight.Normal
-                                            )
+                                            LazyColumn(
+                                                state = fileListState,
+                                                modifier = Modifier
+                                                    .width(contentWidth)
+                                                    .fillMaxHeight(),
+                                                contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp)
+                                            ) {
+                                                items(fileLines.size, key = { it }) { index ->
+                                                    val baseLine = highlightedLines?.getOrNull(index)
+                                                    // No remember here: while highlighting is still
+                                                    // running every key would be (null, query), and
+                                                    // a reused lazy slot could show another index's
+                                                    // text. Highlighting one visible line is cheap.
+                                                    val lineText = if (baseLine != null) {
+                                                        applySearchHighlight(baseLine, searchQuery)
+                                                    } else {
+                                                        highlightSearchAnnotated(fileLines[index], searchQuery)
+                                                    }
+                                                    val isSearchLine = searchMatchLineSet.contains(index)
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .height(codeRowHeight)
+                                                            .background(
+                                                                if (isSearchLine) Color(0x22F1FA8C)
+                                                                else Color.Transparent
+                                                            ),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        // Fixed-width gutter keeps every code line
+                                                        // starting at the same x, even when the
+                                                        // line-number digit count changes.
+                                                        Text(
+                                                            text = "${index + 1}",
+                                                            style = gutterTextStyle,
+                                                            maxLines = 1,
+                                                            softWrap = false,
+                                                            modifier = Modifier
+                                                                .width(gutterWidth)
+                                                                .padding(start = 8.dp, end = 10.dp)
+                                                        )
+
+                                                        Text(
+                                                            text = lineText,
+                                                            style = codeTextStyle,
+                                                            softWrap = false,
+                                                            maxLines = 1
+                                                        )
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
-                        }
+                            }
                     }
                 }
             }
