@@ -1020,17 +1020,6 @@ fun GH4AAppContent(viewModel: GitHubViewModel) {
                             }
                         }
                     },
-                    actions = {
-                        IconButton(
-                            onClick = { viewModel.navigateTo(Screen.Settings) }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "Settings",
-                                tint = if (currentScreen is Screen.Settings) Color(0xFF00E5FF) else Color.White
-                            )
-                        }
-                    },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = Color.Black,
                         titleContentColor = Color.White
@@ -1083,8 +1072,8 @@ fun GH4AAppContent(viewModel: GitHubViewModel) {
                     NavigationBarItem(
                         selected = currentScreen is Screen.Settings,
                         onClick = { viewModel.navigateTo(Screen.Settings) },
-                        icon = { Icon(Icons.Default.Lock, contentDescription = "API Token") },
-                        label = { Text("API Token", fontFamily = FontFamily.Default) },
+                        icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
+                        label = { Text("Settings", fontFamily = FontFamily.Default) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = Color.Black,
                             selectedTextColor = Color(0xFF00E5FF),
